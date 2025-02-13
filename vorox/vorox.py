@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from transformers import AutoTokenizer
 
 from vorox.config import Config
+from vorox.utils import get_available_devices
 
 """
 What's left?
@@ -342,10 +343,11 @@ if __name__ == "__main__":
     print(f"Torch version: {torch.__version__}")
     print(f"Torch CUDA available: {torch.cuda.is_available()}")
     print(f"Torch MPS available: {torch.backends.mps.is_available()}")
+    print(f"Torch Available Devices: {get_available_devices()}")
     print(f"Torch device: {torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')}")
     print()
 
-    with open("configs/test.yml", "r") as f:
+    with open("configs/20M_test_model.yml", "r") as f:
         cfg = Config.model_validate(yaml.safe_load(f))
 
     pprint(dict(cfg))
