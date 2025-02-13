@@ -34,9 +34,9 @@ def epoch(tokenizer, model, train_loader, val_loader, optimizer, loss_fn):
 
 
 def fit(tokenizer, model, train_loader, val_loader, optimizer, loss_fn, epochs):
-    for epoch in range(epochs):
+    for ep in range(epochs):
         train_loss, val_loss = epoch(tokenizer, model, train_loader, val_loader, optimizer, loss_fn)
-        print(f"Epoch {epoch+1}, Train Loss: {train_loss}, Validation Loss: {val_loss}")
+        print(f"Epoch {ep+1}, Train Loss: {train_loss}, Validation Loss: {val_loss}")
 
     return model
 
