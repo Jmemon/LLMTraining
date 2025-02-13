@@ -243,19 +243,95 @@ class Vorox(nn.Module):
         self.vocab_size = vocab_size
 
         self.emb = nn.Embedding(vocab_size, self.d_model)
-        self.blocks = nn.ModuleList([VoroxDecoderBlock(cfg) for _ in range(cfg.architecture.n_layers)])
+        self.transformer_blocks = nn.Sequential(*[VoroxDecoderBlock(cfg) for _ in range(cfg.architecture.n_layers)])
         self.ff_out = nn.Linear(self.d_model, vocab_size)
-
-    @property
-    def trainable_parameters(self):
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def forward(self, input_ids: torch.Tensor):
         x = self.emb(input_ids)
-        for block in self.blocks:
-            x = block(x)
+        x = self.transformer_blocks(x)
         x = self.ff_out(x)
         return x
+    
+    @property
+    def trainable_parameters(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+    
+    @property
+    def parameter_breakdown(self):
+        """
+        Returns a formatted string showing the parameter breakdown hierarchy.
+        
+        Args:
+            indent: Current indentation level (used recursively)
+            
+        Returns:
+            Formatted string showing parameter counts for all modules and submodules
+        """
+        total, breakdown = self._generate_parameter_breakdown()
+        
+        def _format_breakdown(breakdown_dict, level=0):
+            lines = []
+            for name, (count, subbreakdown) in breakdown_dict.items():
+                prefix = "    " * level
+                lines.append(f"{prefix}{name}: {count:,}")
+                if subbreakdown:
+                    lines.extend(_format_breakdown(subbreakdown, level + 1))
+            return lines
+        
+        return "\n" + "\n".join([f"====== Parameter Breakdown (Total={total:,}) ======"] + _format_breakdown(breakdown) + ["=" * 60])
+
+    def _generate_parameter_breakdown(self) -> Tuple[int, dict]:
+        """
+        Recursively calculates parameter counts for each module and submodule.
+        
+        Returns:
+            Tuple containing:
+            - Total parameter count for this module
+            - Dict mapping submodule names to their (count, breakdown) tuples
+        """
+        total = 0
+        breakdown = {}
+        
+        # Get parameters directly attached to this module
+        for name, param in self.named_parameters(recurse=False):
+            total += param.numel()
+            breakdown[name] = (param.numel(), {})
+            
+        # Recursively get parameters from child modules
+        for name, child in self.named_children():
+            if isinstance(child, nn.ModuleList):
+                # Handle ModuleList specially
+                breakdown[name] = {}
+                list_total = 0
+                for i, subchild in enumerate(child):
+                    subtotal, subbreakdown = self._module_breakdown(subchild)
+                    list_total += subtotal
+                    breakdown[name][f"{name}.{i}"] = (subtotal, subbreakdown)
+                total += list_total
+            else:
+                subtotal, subbreakdown = self._module_breakdown(child)
+                total += subtotal
+                breakdown[name] = (subtotal, subbreakdown)
+                
+        return total, breakdown
+    
+    def _module_breakdown(self, module: nn.Module) -> Tuple[int, dict]:
+        """Helper function for parameter_breakdown()"""
+        total = 0
+        breakdown = {}
+        
+        # Get parameters directly attached to this module
+        for name, param in module.named_parameters(recurse=False):
+            total += param.numel()
+            breakdown[name] = (param.numel(), {})
+            
+        # Recursively get parameters from child modules
+        for name, child in module.named_children():
+            subtotal, subbreakdown = self._module_breakdown(child)
+            total += subtotal
+            breakdown[name] = (subtotal, subbreakdown)
+            
+        return total, breakdown
     
 
 if __name__ == "__main__":
@@ -275,9 +351,11 @@ if __name__ == "__main__":
     pprint(dict(cfg))
     print()
 
+    device = torch.device('mps')
+
     start = time.time()
     tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer.name)
-    model = Vorox(cfg, vocab_size=256_000)  # ~15M parameters (print(model.trainable_parameters))
+    model = Vorox(cfg, vocab_size=tokenizer.vocab_size)
     init_time = time.time() - start
     param_memory = sum(p.nelement() * p.element_size() for p in model.parameters())
     trainable_param_memory = sum(p.nelement() * p.element_size() for p in model.parameters() if p.requires_grad)
@@ -285,12 +363,21 @@ if __name__ == "__main__":
     print(f"Model parameters memory usage: {param_memory / 1024 / 1024:.2f} MB")
     print(f"Trainable parameters memory usage: {trainable_param_memory / 1024 / 1024:.2f} MB")
     print(f"Trainable parameters count: {model.trainable_parameters:,}")
+    print(model.parameter_breakdown)
     print()
 
-    exit()
-
     x = torch.randint(0, tokenizer.vocab_size, (cfg.train.batch_size, cfg.train.max_seq_len))
-    print(f"Input tensor (1, 1024, 512) memory usage: {x.element_size() * x.nelement() / 1024 / 1024:.2f} MB")
+    print(f"Input tensor {x.size()} memory usage: {x.element_size() * x.nelement() / 1024 / 1024:.2f} MB")
+    print()
+
+    start = time.time()
+    model = model.to(device)
+    print(f"Model to device time: {time.time() - start:.2f} seconds")
+    print()
+
+    start = time.time()
+    x = x.to(device)
+    print(f"Input tensor to device time: {time.time() - start:.2f} seconds")
     print()
 
     start = time.time()
