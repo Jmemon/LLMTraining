@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 
 
 class DummyDataset(torch.utils.data.Dataset):
@@ -11,3 +12,11 @@ class DummyDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return self.size
+
+
+class DummyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return x

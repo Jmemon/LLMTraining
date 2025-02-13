@@ -11,13 +11,14 @@ def train_step(model, optimizer, loss_fn, batch):
     return loss.item()
 
 
-def epoch(model, train_loader, val_loader, optimizer, loss_fn):
+def epoch(tokenizer, model, train_loader, val_loader, optimizer, loss_fn):
     model.train()
     train_loss = 0
     for batch in train_loader:
         optimizer.zero_grad()
-        outputs = model(batch)
-        loss = loss_fn(outputs, batch)
+        input_ids = tokenizer(batch, return_tensors="pt").input_ids
+        outputs = model(input_ids)
+        loss = loss_fn(outputs, input_ids)
         train_loss += loss.item()
         loss.backward()
         optimizer.step()
@@ -32,9 +33,10 @@ def epoch(model, train_loader, val_loader, optimizer, loss_fn):
     return train_loss / len(train_loader), val_loss / len(val_loader)
 
 
-def fit(model, train_loader, val_loader, optimizer, loss_fn, epochs):
+def fit(tokenizer, model, train_loader, val_loader, optimizer, loss_fn, epochs):
     for epoch in range(epochs):
-        train_loss, val_loss = epoch(model, train_loader, val_loader, optimizer, loss_fn)
+        train_loss, val_loss = epoch(tokenizer, model, train_loader, val_loader, optimizer, loss_fn)
         print(f"Epoch {epoch+1}, Train Loss: {train_loss}, Validation Loss: {val_loss}")
 
     return model
+
