@@ -1,0 +1,40 @@
+name: vorox
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10.14
+  - pytorch=2.4.0
+  - pip
+  - pip:
+      # ... keeping core AI/ML packages ...
+      - accelerate==0.33.0
+      - langchain==0.3.17
+      - langchain-community==0.3.16
+      - langchain-core==0.3.33
+      - langchain-openai==0.2.14
+      - openai==1.60.2
+      - chromadb==0.5.23
+      - transformers==4.43.3
+      - peft==0.12.0
+      - tiktoken==0.7.0
+      - numpy==1.26.4
+      - pandas==2.2.2
+      - matplotlib==3.9.2
+      # ... keeping web frameworks and utilities ...
+      - fastapi==0.115.8
+      - uvicorn==0.34.0
+      - aiohttp==3.11.11
+      - requests==2.32.3
+      - python-dotenv==1.0.1
+      # ... keeping data processing and utilities ...
+      - pdfplumber==0.11.5
+      - beautifulsoup4==4.12.3
+      - pillow==11.0.0
+      # ... keeping development tools ...
+      - ipython==8.31.0
+      - pytest==8.1.1
+      # Removing all pyobjc packages as they're macOS specific
+      # Adding Linux-specific packages if needed
+      - python-multipart==0.0.9  # Often needed for FastAPI file uploads 

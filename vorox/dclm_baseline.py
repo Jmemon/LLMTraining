@@ -1,4 +1,3 @@
-
 from datasets import load_dataset
 from pprint import pprint
 import torch
@@ -43,11 +42,30 @@ Example datapoint:
 hf_dataset_name = "mlfoundations/dclm-baseline-1.0"
 
 
-def dclm_baseline_gen():
+def dclm_baseline_gen(macro_batch_size):
     dataset = load_dataset(hf_dataset_name, split="train", streaming=True)
+    counter = 0
+    batch = []
     for example in dataset:
-        yield example
+        counter += 1
+        batch.append(example)
+        if counter == macro_batch_size:
+            yield batch
+            batch = []
+            counter = 0
 
+
+def collate_fn(batch):
+    """
+    Custom collate function that extracts only the text field from the dataset examples.
+    
+    Args:
+        batch: List of dictionaries containing dataset examples
+        
+    Returns:
+        List of text strings from the examples
+    """
+    return [example[0]['text'] for example in batch]
 
 class BabyDCLMBaseline(torch.utils.data.Dataset):
     """
@@ -55,9 +73,9 @@ class BabyDCLMBaseline(torch.utils.data.Dataset):
     """
 
     def __init__(self, macro_batch_size=1024, num_batches=100):
-        self.dataset_gen = dclm_baseline_gen()
         self.macro_batch_size = macro_batch_size
         self.num_batches = num_batches
+        self.dataset_gen = dclm_baseline_gen(self.macro_batch_size)
 
     def __len__(self):
         return self.num_batches
