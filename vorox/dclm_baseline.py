@@ -49,7 +49,7 @@ def dclm_baseline_gen():
         yield example
 
 
-class BabyDCLM(torch.utils.data.Dataset):
+class BabyDCLMBaseline(torch.utils.data.Dataset):
     """
     Required capped number of batches for easy testing.
     """
