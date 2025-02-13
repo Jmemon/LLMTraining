@@ -1,4 +1,4 @@
-name: ai
+name: vorox
 channels:
   - pytorch
   - conda-forge
