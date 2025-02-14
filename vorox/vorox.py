@@ -10,10 +10,32 @@ from transformers import AutoTokenizer
 from vorox.config import Config
 from vorox.utils import get_available_devices
 
-"""
-What's left?
-implement rope.
-"""
+
+
+class Activation(nn.Module):
+    
+    @classmethod
+    def build(cls, cfg: Config):
+        if cfg.architecture.activation == "gelu":
+            return nn.GELU()
+        elif cfg.architecture.activation == "relu":
+            return nn.ReLU()
+        elif cfg.architecture.activation == "silu":
+            return nn.SiLU()
+        elif cfg.architecture.activation == "swiglu":
+            return SwiGLU()
+        else:
+            raise ValueError(f"Activation {cfg.architecture.activation} not supported")
+        
+
+class SwiGLU(Activation):
+    
+    def __init__(self) -> None:
+        super().__init__()
+    
+    def forward(self, x):
+        x, gate = x.chunk(2, dim=-1)
+        return F.silu(gate) * x
 
 
 class RoPE(nn.Module):
@@ -223,7 +245,7 @@ class VoroxDecoderBlock(nn.Module):
         self.mlp_norm = LayerNorm((self.d_model,), elementwise_affine=False)
         self.mlp = nn.Sequential(
             nn.Linear(self.d_model, self.d_model * 4),
-            nn.GELU(),
+            Activation.build(cfg),
             nn.Linear(self.d_model * 4, self.d_model),
         )
 

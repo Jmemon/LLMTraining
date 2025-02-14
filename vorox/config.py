@@ -6,11 +6,18 @@ import yaml
 class Tokenizer(BaseModel):
     name: str
 
+class ActivationType(str, Enum):
+    gelu = "gelu"
+    relu = "relu"
+    silu = "silu"
+    swiglu = "swiglu"
+
 class Architecture(BaseModel):
     n_layers: int
     d_model: int
     n_heads: int
     n_kv_heads: int
+    activation: ActivationType
     rope: bool
     rope_theta: int
 
