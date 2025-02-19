@@ -1,44 +1,46 @@
 from tqdm import tqdm
 
 import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+
+from vorox.config import Config
 
 
-def train_step(model, optimizer, loss_fn, batch):
-    model.train()
-    optimizer.zero_grad()
-    outputs = model(batch)
-    loss = loss_fn(outputs, batch)
-    loss.backward()
-    optimizer.step()
-    return loss.item()
-
-
-def epoch(cfg, tokenizer, model, train_loader, val_loader, optimizer, loss_fn):
-    model.train()
-    train_loss = 0
-    for batch in tqdm(train_loader):
-        optimizer.zero_grad()
-        #input_ids = tokenizer(batch, padding=True, truncation=True, max_length=cfg.train.max_seq_len, return_tensors="pt").input_ids
-        outputs = model(batch)
-        loss = loss_fn(outputs, batch)
-        train_loss += loss.item()
-        loss.backward()
-        optimizer.step()
-
-    model.eval()
-    with torch.no_grad():
-        for batch in tqdm(val_loader):
-            outputs = model(batch)
-            loss = loss_fn(outputs, batch)
-            val_loss += loss.item()
-
-    return train_loss / len(train_loader), val_loss / len(val_loader)
-
-
-def fit(cfg, tokenizer, model, train_loader, val_loader, optimizer, loss_fn, epochs):
+def fit(
+    cfg: Config,
+    model: nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    optimizer: optim.Optimizer,
+    loss_fn: nn.Module,
+    epochs: int
+):
+    model = model.to(cfg.device)
     for ep in tqdm(range(epochs)):
-        train_loss, val_loss = epoch(cfg, tokenizer, model, train_loader, val_loader, optimizer, loss_fn)
+        model.train()
+        train_loss = 0
+        for batch in tqdm(train_loader):
+            optimizer.zero_grad()
+            batch = batch.to(cfg.device)
+            batch_split = torch.chunk(batch, cfg.train.micro_batch_size, dim=0)
+            for micro_batch in batch_split:
+                outputs = model(micro_batch)
+                loss = loss_fn(outputs, micro_batch)
+                train_loss += loss.item()
+                loss.backward()
+            optimizer.step()
+            exit()
+
+        model.eval()
+        with torch.no_grad():
+            for batch in tqdm(val_loader):
+                outputs = model(batch)
+                loss = loss_fn(outputs, batch)
+                val_loss += loss.item()
+
+        train_loss, val_loss = train_loss / len(train_loader), val_loss / len(val_loader)
         print(f"Epoch {ep+1}, Train Loss: {train_loss}, Validation Loss: {val_loss}")
 
     return model
-

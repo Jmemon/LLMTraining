@@ -143,7 +143,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer.name)
     
     # Build the model, optimizer, and loss function.
-    model = Vorox(cfg, tokenizer.vocab_size)
+    model = Vorox(cfg, tokenizer.vocab_size).to(cfg.device)
     optimizer = OptimizerBase.build(model, cfg)
     loss_fn = LossBase.build(cfg)
     
@@ -184,7 +184,7 @@ def main():
         try:
             first_item = next(dataset_iterator)
             logging.info("Successfully loaded first item from dataset")
-            logging.info(f"First item shape/type: {type(first_item)}")
+            logging.info(f"First item shape/type: {first_item.shape}/{type(first_item)}")
         except StopIteration:
             # Add detailed diagnostics
             logging.error("Dataset is empty - attempting diagnosis:")
@@ -205,16 +205,14 @@ def main():
         dataset,
         #num_workers=cfg.data.settings.num_workers if hasattr(cfg.data.settings, "num_workers") else 4,
         num_workers=1,
-        batch_size=cfg.train.batch_size,
+        batch_size=cfg.train.macro_batch_size,
     )
-    
-    itr = iter(train_loader)
 
     # Validation loader can also be set up similarly.
     val_loader = None  # Replace with a similar pipeline if validation data exists.
     
     # Start training.
-    fit(cfg, tokenizer, model, train_loader, val_loader, optimizer, loss_fn, cfg.train.epochs)
+    fit(cfg, model, train_loader, val_loader, optimizer, loss_fn, cfg.train.epochs)
 
 if __name__ == "__main__":
     main()

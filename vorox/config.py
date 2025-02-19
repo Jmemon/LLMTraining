@@ -17,6 +17,7 @@ class Architecture(BaseModel):
     d_model: int
     n_heads: int
     n_kv_heads: int
+    hidden_size: int
     activation: ActivationType
     rope: bool
     rope_theta: int
@@ -42,7 +43,8 @@ class Loss(BaseModel):
 
 class Train(BaseModel):
     epochs: int
-    batch_size: int
+    macro_batch_size: int
+    micro_batch_size: int
     max_seq_len: int
 
 class Dataset(str, Enum):
@@ -62,6 +64,11 @@ class TrainingDataConfig(BaseModel):
     settings: DataSettings
     urls: list[str]
 
+class Device(str, Enum):
+    cpu = "cpu"
+    cuda = "cuda"
+    mps = "mps"
+
 class Config(BaseModel):
     tokenizer: Tokenizer
     architecture: Architecture
@@ -69,6 +76,7 @@ class Config(BaseModel):
     loss: Loss
     train: Train
     data: TrainingDataConfig
+    device: Device
 
 if __name__ == "__main__":
     with open("configs/20M_test_model.yml", "r") as f:

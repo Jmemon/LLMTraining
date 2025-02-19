@@ -23,20 +23,21 @@ class Activation(nn.Module):
         elif cfg.architecture.activation == "silu":
             return nn.SiLU()
         elif cfg.architecture.activation == "swiglu":
-            return SwiGLU()
+            return SwiGLU(cfg)
         else:
             raise ValueError(f"Activation {cfg.architecture.activation} not supported")
         
 
 class SwiGLU(Activation):
     
-    def __init__(self) -> None:
+    def __init__(self, cfg: Config) -> None:
         super().__init__()
+        self.hidden_size = cfg.architecture.hidden_size
+        self.gate = nn.Linear(self.hidden_size, self.hidden_size)
+        self.linear_proj = nn.Linear(self.hidden_size, self.hidden_size)
     
-    def forward(self, x):
-        x, gate = x.chunk(2, dim=-1)
-        return F.silu(gate) * x
-
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.silu(self.gate(x)) * self.linear_proj(x)
 
 class RoPE(nn.Module):
     """
@@ -239,14 +240,15 @@ class VoroxDecoderBlock(nn.Module):
         self.d_model = cfg.architecture.d_model
         self.n_heads = cfg.architecture.n_heads
         self.n_kv_heads = cfg.architecture.n_heads // 4
+        self.hidden_size = cfg.architecture.hidden_size
 
         self.attn_norm = LayerNorm((self.d_model,), elementwise_affine=False)
         self.attn = GroupedQueryAttention(cfg)
         self.mlp_norm = LayerNorm((self.d_model,), elementwise_affine=False)
         self.mlp = nn.Sequential(
-            nn.Linear(self.d_model, self.d_model * 4),
+            nn.Linear(self.d_model, self.hidden_size),
             Activation.build(cfg),
-            nn.Linear(self.d_model * 4, self.d_model),
+            nn.Linear(self.hidden_size, self.d_model),
         )
 
     def forward(self, x):
@@ -361,6 +363,9 @@ if __name__ == "__main__":
     import sys
     import time
 
+    import torch.profiler
+    from torch.profiler import schedule, ProfilerActivity
+
     print(f"Python version: {sys.version}")
     print(f"Torch version: {torch.__version__}")
     print(f"Torch CUDA available: {torch.cuda.is_available()}")
@@ -375,44 +380,74 @@ if __name__ == "__main__":
     pprint(dict(cfg))
     print()
 
-    device = torch.device('mps')
+    device = torch.device('cuda')
 
-    start = time.time()
-    tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer.name)
-    model = Vorox(cfg, vocab_size=tokenizer.vocab_size)
-    init_time = time.time() - start
-    param_memory = sum(p.nelement() * p.element_size() for p in model.parameters())
-    trainable_param_memory = sum(p.nelement() * p.element_size() for p in model.parameters() if p.requires_grad)
-    print(f"Initialization time: {init_time:.2f} seconds")
-    print(f"Model parameters memory usage: {param_memory / 1024 / 1024:.2f} MB")
-    print(f"Trainable parameters memory usage: {trainable_param_memory / 1024 / 1024:.2f} MB")
-    print(f"Trainable parameters count: {model.trainable_parameters:,}")
-    print(model.parameter_breakdown)
-    print()
+    #prof_schedule = schedule(wait=0, warmup=0, active=1)
+    def on_trace_ready(p):
+        #profiler_output_dir = Path(self.cfg.save_folder) / "profiler"
+        #profiler_output_dir.mkdir(exist_ok=True)
 
-    x = torch.randint(0, tokenizer.vocab_size, (cfg.train.batch_size, cfg.train.max_seq_len))
-    print(f"Input tensor {x.size()} memory usage: {x.element_size() * x.nelement() / 1024 / 1024:.2f} MB")
-    print()
+        output = p.key_averages().table(sort_by="self_cuda_time_total", row_limit=32)
+        print(f"Profile by total GPU time at step {p.step_num}:\n{output}")
 
-    start = time.time()
-    model = model.to(device)
-    print(f"Model to device time: {time.time() - start:.2f} seconds")
-    print()
+        output = p.key_averages().table(sort_by="self_cuda_memory_usage", row_limit=32)
+        print(f"Profile by total GPU memory usage at step {p.step_num}:\n{output}")
 
-    start = time.time()
-    x = x.to(device)
-    print(f"Input tensor to device time: {time.time() - start:.2f} seconds")
-    print()
+        output = p.key_averages().table(sort_by="self_cpu_time_total", row_limit=32)
+        print(f"Profile by total CPU time at step {p.step_num}:\n{output}")
 
-    start = time.time()
-    out = model(x)
-    print(f"Forward pass time: {time.time() - start:.2f} seconds")
-    print(f"Output tensor (1, 1024, 512) memory usage: {out.element_size() * out.nelement() / 1024 / 1024:.2f} MB")
-    print()
+        #p.export_chrome_trace(
+        #    str(trace_path := (profiler_output_dir / f"{p.step_num}.chrome_trace.json.gz"))
+        #)
+        
+    prof = torch.profiler.profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        #schedule=prof_schedule,
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True,
+        on_trace_ready=on_trace_ready
+    )
 
-    start = time.time()
-    out.sum().backward()
-    bp_time = time.time() - start
-    grad_memory = sum(p.grad.nelement() * p.grad.element_size() for p in model.parameters() if p.grad is not None)
-    print(f"Backward pass time: {bp_time:.2f} seconds")
-    print(f"Gradient memory usage: {grad_memory / 1024 / 1024:.2f} MB")
+    with prof as p:
+        start = time.time()
+        tokenizer = AutoTokenizer.from_pretrained(cfg.tokenizer.name)
+        model = Vorox(cfg, vocab_size=tokenizer.vocab_size)
+        init_time = time.time() - start
+        param_memory = sum(p.nelement() * p.element_size() for p in model.parameters())
+        trainable_param_memory = sum(p.nelement() * p.element_size() for p in model.parameters() if p.requires_grad)
+        print(f"Initialization time: {init_time:.2f} seconds")
+        print(f"Model parameters memory usage: {param_memory / 1024 / 1024:.2f} MB")
+        print(f"Trainable parameters memory usage: {trainable_param_memory / 1024 / 1024:.2f} MB")
+        print(f"Trainable parameters count: {model.trainable_parameters:,}")
+        print(f"Parameter Type: {next(model.parameters()).dtype}")
+        print()
+
+        x = torch.randint(0, tokenizer.vocab_size, (cfg.train.micro_batch_size, cfg.train.max_seq_len))
+        print(f"Input tensor {x.size()} memory usage: {x.element_size() * x.nelement() / 1024 / 1024:.2f} MB")
+        print()
+
+        start = time.time()
+        model = model.to(device)
+        print(f"Model to device time: {time.time() - start:.2f} seconds")
+        print()
+
+        start = time.time()
+        x = x.to(device)
+        print(f"Input tensor {x.shape} to device time: {time.time() - start:.2f} seconds")
+        print()
+
+        start = time.time()
+        out = model(x)
+        print(f"Forward pass time: {time.time() - start:.2f} seconds")
+        print(f"Output tensor {out.shape} memory usage: {out.element_size() * out.nelement() / 1024 / 1024:.2f} MB")
+        print()
+
+        start = time.time()
+        out.sum().backward()
+        bp_time = time.time() - start
+        grad_memory = sum(p.grad.nelement() * p.grad.element_size() for p in model.parameters() if p.grad is not None)
+        print(f"Backward pass time: {bp_time:.2f} seconds")
+        print(f"Gradient memory usage: {grad_memory / 1024 / 1024:.2f} MB")
+
+        p.step()
