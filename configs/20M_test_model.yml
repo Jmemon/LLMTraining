@@ -24,3 +24,21 @@ train:
   epochs: 10
   batch_size: 1024
   max_seq_len: 1024
+
+data:
+  settings:
+    prefetch_size: 10000
+    cache_dsn: None
+    shuffle_buffer: false
+    num_workers: 4
+  urls:
+    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000000_processed.tar"
+    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000001_processed.tar"
+    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000002_processed.tar"
+    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000003_processed.tar"
+    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000004_processed.tar"
+    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000005_processed.tar"
+    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000006_processed.tar"
+    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000007_processed.tar"
+    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000008_processed.tar"
+    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000009_processed.tar"

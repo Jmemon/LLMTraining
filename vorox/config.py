@@ -45,12 +45,30 @@ class Train(BaseModel):
     batch_size: int
     max_seq_len: int
 
+class Dataset(str, Enum):
+    dclm_baseline = "dclm_baseline"
+    thestack = "thestack"
+    dolma = "dolma"
+    redpajama = "redpajama"
+
+class DataSettings(BaseModel):
+    prefetch_size: int
+    cache_dsn: str  # PostgreSQL DSN (e.g., postgresql://user:pass@host:port/db)
+    shuffle_buffer: bool = False
+    num_workers: int = 4
+    # Additional settings (e.g. timeouts) can be added here
+
+class TrainingDataConfig(BaseModel):
+    settings: DataSettings
+    urls: list[str]
+
 class Config(BaseModel):
     tokenizer: Tokenizer
     architecture: Architecture
     optimizer: Optimizer
     loss: Loss
     train: Train
+    data: TrainingDataConfig
 
 if __name__ == "__main__":
     with open("configs/20M_test_model.yml", "r") as f:

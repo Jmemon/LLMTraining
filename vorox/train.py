@@ -18,9 +18,9 @@ def epoch(cfg, tokenizer, model, train_loader, val_loader, optimizer, loss_fn):
     train_loss = 0
     for batch in tqdm(train_loader):
         optimizer.zero_grad()
-        input_ids = tokenizer(batch, padding=True, truncation=True, max_length=cfg.train.max_seq_len, return_tensors="pt").input_ids
-        outputs = model(input_ids)
-        loss = loss_fn(outputs, input_ids)
+        #input_ids = tokenizer(batch, padding=True, truncation=True, max_length=cfg.train.max_seq_len, return_tensors="pt").input_ids
+        outputs = model(batch)
+        loss = loss_fn(outputs, batch)
         train_loss += loss.item()
         loss.backward()
         optimizer.step()
