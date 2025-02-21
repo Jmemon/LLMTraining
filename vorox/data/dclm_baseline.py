@@ -20,47 +20,6 @@ def get_dclm_baseline_urls(bucket: str, prefix: str = DCLM_PREFIX) -> list[str]:
     return [obj['Key'] for obj in response.get('Contents', []) if obj['Key'].startswith(prefix)]
 
 
-def convert_jsonl_zst_to_tar(input_path: str) -> io.BytesIO:
-    """
-    Converts a .jsonl.zst file to a .tar file where each JSON object becomes a separate file.
-    
-    Args:
-        input_path (str): Path to the input .jsonl.zst file
-    
-    Returns:
-        io.BytesIO: A buffer containing the tar file data
-    """
-    # Create a buffer for the tar file
-    tar_buffer = io.BytesIO()
-    
-    # Open the tar file in write mode
-    with tarfile.open(fileobj=tar_buffer, mode='w') as tar:
-        # Decompress the .zst file
-        with open(input_path, 'rb') as fh:
-            dctx = zstd.ZstdDecompressor()
-            with dctx.stream_reader(fh) as reader:
-                text = reader.read().decode('utf-8')
-                
-                # Process each line (JSON object)
-                for i, line in enumerate(text.split('\n')):
-                    if not line.strip():
-                        continue
-                        
-                    # Create a file for each JSON object
-                    json_data = json.loads(line)
-                    file_content = json.dumps(json_data, indent=2).encode('utf-8')
-                    
-                    # Create a TarInfo object for the file
-                    tarinfo = tarfile.TarInfo(name=f'document_{i:06d}.json')
-                    tarinfo.size = len(file_content)
-                    
-                    # Add the file to the tar archive
-                    tar.addfile(tarinfo, io.BytesIO(file_content))
-    
-    tar_buffer.seek(0)
-    return tar_buffer
-
-
 def convert_jsonl_zst_to_webdataset(input_path: str) -> io.BytesIO:
     """
     Converts a .jsonl.zst file to a WebDataset-format tar file.

@@ -15,10 +15,9 @@ def fit(
     val_loader: DataLoader,
     optimizer: optim.Optimizer,
     loss_fn: nn.Module,
-    epochs: int
 ):
     model = model.to(cfg.device)
-    for ep in tqdm(range(epochs)):
+    for ep in tqdm(range(cfg.train.epochs)):
         model.train()
         train_loss = 0
         for batch in tqdm(train_loader):

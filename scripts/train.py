@@ -28,14 +28,12 @@ import webdataset as wds
 import boto3
 import requests
 from urllib.parse import urlparse
-from typing import List
 
 from vorox.config import Config
 from vorox.loss import LossBase
 from vorox.optimizer import OptimizerBase
 from vorox.train import fit
 from vorox.vorox import Vorox
-from vorox.data.dclm_baseline import get_dclm_baseline_urls
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -212,7 +210,7 @@ def main():
     val_loader = None  # Replace with a similar pipeline if validation data exists.
     
     # Start training.
-    fit(cfg, model, train_loader, val_loader, optimizer, loss_fn, cfg.train.epochs)
+    fit(cfg, model, train_loader, val_loader, optimizer, loss_fn)
 
 if __name__ == "__main__":
     main()
