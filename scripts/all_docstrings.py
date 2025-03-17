@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import sys
+import argparse
 from pathlib import Path
 
 
@@ -54,16 +55,35 @@ def process_file(file_path, docstring_utility):
 
 def main():
     """
-    Main function to iterate through the vorox directory and create docstrings
+    Main function to iterate through the specified directory and create docstrings
     for all Python components found.
     """
-    src_dir = Path("vorox")
+    # Set up argument parser
+    parser = argparse.ArgumentParser(
+        description="Generate docstrings for Python components in a directory"
+    )
+    parser.add_argument(
+        "src_dir", 
+        nargs="?", 
+        default="vorox",
+        help="Source directory to process (default: vorox)"
+    )
+    args = parser.parse_args()
+    
+    src_dir = Path(args.src_dir)
     docstring_utility = Path.home() / "Desktop" / "utilities" / "create_docstring.py"
     
+    # Verify the source directory exists
+    if not src_dir.exists() or not src_dir.is_dir():
+        print(f"Error: Source directory not found: {src_dir}")
+        return
+        
     # Verify the docstring utility exists
     if not docstring_utility.exists():
         print(f"Error: Docstring utility not found at {docstring_utility}")
         return
+    
+    print(f"Processing source directory: {src_dir}")
     
     # Walk through the directory structure
     for root, _, files in os.walk(src_dir):
