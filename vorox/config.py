@@ -55,7 +55,7 @@ class Dataset(str, Enum):
     dolma = "dolma"
     redpajama = "redpajama"
 
-class DataSettings(BaseModel):
+class Data(BaseModel):
     prefetch_size: int
     cache_dsn: str  # PostgreSQL DSN (e.g., postgresql://user:pass@host:port/db)
     shuffle_buffer: bool = False
@@ -63,11 +63,9 @@ class DataSettings(BaseModel):
     macro_batch_size: int
     micro_batch_size: int
     max_seq_len: int
+    train_data: List[Dataset]
+    val_data: List[Dataset]
     # Additional settings (e.g. timeouts) can be added here
-
-class TrainingDataConfig(BaseModel):
-    settings: DataSettings
-    urls: list[str]
 
 class Hardware(BaseModel):
     device: Literal["cpu", "cuda", "mps"]
@@ -80,7 +78,7 @@ class Config(BaseModel):
     optimizer: Optimizer
     loss: Loss
     train: Train
-    data: TrainingDataConfig
+    data: Data
     hardware: Hardware
 
 if __name__ == "__main__":
