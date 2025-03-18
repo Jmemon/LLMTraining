@@ -67,6 +67,31 @@ class Data(BaseModel):
     val_data: List[Dataset]
     # Additional settings (e.g. timeouts) can be added here
 
+class Metrics(BaseModel):
+    compute_metrics: bool
+    train_metrics: List[Literal["loss"]]
+    val_metrics: List[Literal["loss"]]
+    val_check_interval: float = 1.0
+    early_stopping: bool
+    early_stopping_patience: int
+    early_stopping_min_delta: float
+
+class Logging(BaseModel):
+    wandb_project: str
+    wandb_entity: Optional[str] = None
+    wandb_run_name: Optional[str] = None
+    wandb_tags: List[str] = []
+    log_every_n_steps: int = 50
+
+class Checkpoint(BaseModel):
+    save_top_k: int = 3
+    checkpoint_dir: str
+    monitor: str = "val/loss"
+    mode: Literal["min", "max"] = "min"
+    save_last: bool = True
+    save_every_n_steps: int = 1000
+    load_from_checkpoint: Optional[str] = None
+
 class Hardware(BaseModel):
     device: Literal["cpu", "cuda", "mps"]
     precision: Literal["fp32", "fp16", "bf16"]
@@ -80,6 +105,9 @@ class Config(BaseModel):
     train: Train
     data: Data
     hardware: Hardware
+    metrics: Metrics
+    logging: Logging
+    checkpoint: Checkpoint
 
 if __name__ == "__main__":
     with open("configs/20M_test_model.yml", "r") as f:
