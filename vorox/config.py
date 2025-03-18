@@ -1,43 +1,9 @@
 from enum import Enum
+from typing import Optional, Literal, List
 from pydantic import BaseModel
 import yaml
 
 
-class Tokenizer(BaseModel):
-    """
-    Configuration model for text tokenization in the Vorox framework.
-    
-    Encapsulates tokenizer identification and configuration for neural language models.
-    The tokenizer is responsible for converting raw text into token IDs and vice versa.
-    
-    Architecture:
-        Inherits from Pydantic's BaseModel for validation and serialization.
-        Simple structure with minimal configuration to support various tokenizer implementations.
-    
-    Interface:
-        - name (str): Identifier for the tokenizer implementation to use. Must correspond to a 
-          valid tokenizer name in the underlying tokenization library (e.g., "gpt2", "llama", 
-          "sentencepiece"). No default value; must be explicitly provided.
-    
-    Behavior:
-        - Immutable after initialization following Pydantic's data model pattern
-        - Thread-safe for read operations
-        - No internal state management beyond the configured properties
-    
-    Integration:
-        - Initialized via Pydantic's model_validate method from YAML/JSON configuration
-        - Example: 
-          ```
-          tokenizer_config = Tokenizer.model_validate({"name": "gpt2"})
-          ```
-        - Used as a component in the main Config class to define tokenization strategy
-    
-    Limitations:
-        - Does not directly instantiate tokenizer objects; serves as configuration only
-        - Additional tokenizer-specific parameters must be added to support advanced configurations
-        - No validation for tokenizer name existence in the target library
-    """
-    name: str
 
 class ActivationType(str, Enum):
     """
@@ -83,13 +49,13 @@ class ActivationType(str, Enum):
     silu = "silu"
     swiglu = "swiglu"
 
-class Architecture(BaseModel):
+class Model(BaseModel):
     """
-    Configuration model for neural network architecture parameters in the Vorox framework.
+    Configuration model for neural network architecture and tokenization in the Vorox framework.
     
     Defines the structural hyperparameters for transformer-based language models, encapsulating
-    the dimensional specifications and activation mechanisms that determine model capacity and
-    computational characteristics.
+    both the dimensional specifications and tokenization strategy that determine model capacity,
+    computational characteristics, and text processing capabilities.
     
     Architecture:
         Inherits from Pydantic's BaseModel for validation and serialization.
@@ -97,6 +63,9 @@ class Architecture(BaseModel):
         values. Parameters are validated at initialization time with type checking.
     
     Interface:
+        - tokenizer_name (str): Identifier for the tokenizer implementation to use.
+          Must correspond to a valid tokenizer name in the underlying tokenization library
+          (e.g., "gpt2", "llama", "sentencepiece"). No default value; must be explicitly provided.
         - n_layers (int): Number of transformer decoder blocks in the model stack.
           Directly impacts model depth and computational complexity (O(n_layers)).
         - d_model (int): Embedding dimension size for token representations.
@@ -127,11 +96,12 @@ class Architecture(BaseModel):
         - Used by Vorox model constructor to instantiate neural network components
         - Example:
           ```
-          arch_config = Architecture.model_validate({
+          model_config = Model.model_validate({
+              "tokenizer_name": "gpt2",
               "n_layers": 12, "d_model": 768, "n_heads": 12, "n_kv_heads": 12,
               "hidden_size": 3072, "activation": "gelu", "rope": True, "rope_theta": 10000
           })
-          model = Vorox(arch_config)
+          model = Vorox(model_config)
           ```
     
     Limitations:
@@ -139,7 +109,10 @@ class Architecture(BaseModel):
         - No support for variable-depth architectures or per-layer configurations
         - Limited to transformer decoder-only architectures; encoder-decoder not supported
         - No explicit memory usage estimation based on parameter values
+        - Does not directly instantiate tokenizer objects; serves as configuration only
+        - No validation for tokenizer name existence in the target library
     """
+    tokenizer_name: str
     n_layers: int
     d_model: int
     n_heads: int
@@ -189,7 +162,6 @@ class OptimizerType(str, Enum):
         - Limited to predefined optimizers; custom optimizers require code changes
         - No support for optimizer-specific parameters beyond those in the Optimizer model
         - Implementation details of each optimizer are defined in torch.optim
-        - No support for learning rate schedulers or adaptive learning rate methods
     """
     adamw = "adamw"
     adam = "adam"
@@ -221,6 +193,23 @@ class Optimizer(BaseModel):
         - weight_decay (float): L2 regularization coefficient applied to model weights.
           Controls model complexity by penalizing large weights. Typical range: 0 to 0.1.
           In AdamW, applied as true regularization; in Adam, modifies gradient directly.
+        - momentum (float): Momentum factor for SGD optimizer.
+          Controls the contribution of previous gradients to current update.
+          Typical range: 0 to 0.9. Default: 0.0 (no momentum).
+        - warmup_steps (int): Number of training steps for learning rate warmup.
+          Controls the gradual increase of learning rate at the beginning of training.
+          Default: 0 (no warmup).
+        - warmup_ratio (float): Fraction of training steps for learning rate warmup.
+          Alternative to warmup_steps, specified as a ratio of total training steps.
+          Default: 0.0 (no warmup).
+        - scheduler (Optional[Literal["cosine", "constant"]]): Learning rate scheduler type.
+          Controls how learning rate changes during training.
+          "cosine": Implements cosine decay from initial lr to near zero.
+          "constant": Maintains fixed learning rate after warmup.
+          Default: None (no scheduling).
+        - gradient_clip_val (float): Maximum allowed gradient norm for gradient clipping.
+          Prevents exploding gradients by scaling down large gradients.
+          Default: 1.0 (standard clipping threshold).
     
     Behavior:
         - Immutable after initialization following Pydantic's data model pattern
@@ -235,23 +224,27 @@ class Optimizer(BaseModel):
         - Example:
           ```
           optimizer_config = Optimizer.model_validate({
-              "type": "adamw", "lr": 1e-4, "betas": [0.9, 0.999], "weight_decay": 0.01
+              "type": "adamw", "lr": 1e-4, "betas": [0.9, 0.999], "weight_decay": 0.01,
+              "warmup_steps": 1000, "scheduler": "cosine"
           })
           optimizer = OptimizerBase.build(model, config)
           ```
     
     Limitations:
-        - No support for learning rate schedulers or warmup strategies
-        - Limited to fixed learning rates; no adaptive methods beyond Adam variants
-        - No support for optimizer-specific parameters (e.g., amsgrad for Adam)
         - Beta parameters must be provided as a list, not a tuple as expected by PyTorch
         - No validation for numerical stability (e.g., extremely small/large learning rates)
-        - No gradient clipping configuration
+        - Limited scheduler options compared to full PyTorch scheduler ecosystem
+        - No support for custom scheduling functions or complex decay patterns
     """
     type: OptimizerType
     lr: float
     betas: list[float]
     weight_decay: float
+    momentum: float = 0.0
+    warmup_steps: int = 0
+    warmup_ratio: float = 0.0
+    scheduler: Optional[Literal["cosine", "constant"]] = None
+    gradient_clip_val: float = 1.0
 
 class LossType(str, Enum):
     """
@@ -317,7 +310,7 @@ class Loss(BaseModel):
         details managed by the LossBase factory class.
     
     Interface:
-        - type (LossType): Enum specifying the loss function algorithm to use.
+        - name (LossType): Enum specifying the loss function algorithm to use.
           Must be a valid member of the LossType enum (mse, cross_entropy, or perplexity).
           No default value; must be explicitly provided in configuration.
           Determines the mathematical objective function for model optimization.
@@ -334,7 +327,7 @@ class Loss(BaseModel):
           nn.Module implementation from torch.nn
         - Example:
           ```
-          loss_config = Loss.model_validate({"type": "cross_entropy"})
+          loss_config = Loss.model_validate({"name": "cross_entropy"})
           loss_fn = LossBase.build(config)
           ```
         - Used as a component in the main Config class to define training objective
@@ -346,14 +339,14 @@ class Loss(BaseModel):
         - Implementation details of each loss are defined in torch.nn or vorox.loss
         - Perplexity requires post-processing of cross-entropy values
     """
-    type: LossType
+    name: LossType
 
 class Train(BaseModel):
     """
     Configuration model for neural network training parameters in the Vorox framework.
     
     Encapsulates core hyperparameters that control the training process lifecycle,
-    including iteration counts, batch sizing strategy, and sequence length constraints.
+    including iteration counts and evaluation strategy.
     
     Architecture:
         Inherits from Pydantic's BaseModel for validation and serialization.
@@ -364,18 +357,6 @@ class Train(BaseModel):
         - epochs (int): Number of complete passes through the training dataset.
           Controls total training duration and convergence opportunity.
           Must be positive; higher values increase training time linearly.
-        - macro_batch_size (int): Number of samples processed per optimization step.
-          Determines gradient estimation quality and memory efficiency.
-          When using gradient accumulation: macro_batch_size = micro_batch_size * accumulation_steps.
-          Must satisfy: macro_batch_size ≥ micro_batch_size and macro_batch_size % micro_batch_size == 0.
-        - micro_batch_size (int): Number of samples processed in a single forward/backward pass.
-          Controls GPU memory usage and parallelization efficiency.
-          Must be positive and not exceed available GPU memory capacity.
-          Smaller values reduce memory requirements but may increase computation time.
-        - max_seq_len (int): Maximum sequence length in tokens for training samples.
-          Directly impacts memory usage (O(max_seq_len²)) due to attention mechanisms.
-          Longer sequences enable modeling of more complex dependencies but require
-          more memory and computation time.
     
     Behavior:
         - Immutable after initialization following Pydantic's data model pattern
@@ -385,28 +366,21 @@ class Train(BaseModel):
     
     Integration:
         - Initialized via Pydantic's model_validate method from YAML/JSON configuration
-        - Used by training loop to control iteration counts and batch sizing
-        - Consumed by DataLoader configuration to set appropriate batch sizes
+        - Used by training loop to control iteration counts
         - Example:
           ```
           train_config = Train.model_validate({
-              "epochs": 3, "macro_batch_size": 32, "micro_batch_size": 8, "max_seq_len": 1024
+              "epochs": 3
           })
           ```
         - Used as a component in the main Config class to define training parameters
     
     Limitations:
-        - Does not validate numerical relationships between parameters (e.g., batch size divisibility)
-        - No support for dynamic/adaptive sequence lengths based on available memory
         - No explicit learning rate scheduling or early stopping configuration
-        - No configuration for gradient accumulation steps (derived from batch sizes)
         - No validation for hardware compatibility (e.g., memory requirements)
-        - No support for curriculum learning or progressive sequence length increases
+        - No support for curriculum learning or progressive training strategies
     """
     epochs: int
-    macro_batch_size: int
-    micro_batch_size: int
-    max_seq_len: int
 
 class Dataset(str, Enum):
     """
@@ -491,6 +465,18 @@ class DataSettings(BaseModel):
           Controls CPU parallelism for data preprocessing and loading operations.
           Higher values increase CPU utilization but may cause contention.
           Default: 4; should not exceed available CPU cores minus one.
+        - macro_batch_size (int): Number of samples processed per optimization step.
+          Determines gradient estimation quality and memory efficiency.
+          When using gradient accumulation: macro_batch_size = micro_batch_size * accumulation_steps.
+          Must satisfy: macro_batch_size ≥ micro_batch_size and macro_batch_size % micro_batch_size == 0.
+        - micro_batch_size (int): Number of samples processed in a single forward/backward pass.
+          Controls GPU memory usage and parallelization efficiency.
+          Must be positive and not exceed available GPU memory capacity.
+          Smaller values reduce memory requirements but may increase computation time.
+        - max_seq_len (int): Maximum sequence length in tokens for training samples.
+          Directly impacts memory usage (O(max_seq_len²)) due to attention mechanisms.
+          Longer sequences enable modeling of more complex dependencies but require
+          more memory and computation time.
     
     Behavior:
         - Immutable after initialization following Pydantic's data model pattern
@@ -509,7 +495,10 @@ class DataSettings(BaseModel):
               "prefetch_size": 4,
               "cache_dsn": "postgresql://user:pass@localhost:5432/vorox_metadata",
               "shuffle_buffer": True,
-              "num_workers": 8
+              "num_workers": 8,
+              "macro_batch_size": 32,
+              "micro_batch_size": 8,
+              "max_seq_len": 1024
           })
           metadata_cache = MetadataCache(data_settings.cache_dsn)
           ```
@@ -522,11 +511,19 @@ class DataSettings(BaseModel):
         - Shuffle buffer implementation is boolean only; no configuration for buffer size
         - No explicit memory usage estimation based on prefetch_size and batch dimensions
         - No support for distributed data loading across multiple nodes
+        - Does not validate numerical relationships between parameters (e.g., batch size divisibility)
+        - No support for dynamic/adaptive sequence lengths based on available memory
+        - No configuration for gradient accumulation steps (derived from batch sizes)
+        - No validation for hardware compatibility (e.g., memory requirements)
+        - No support for curriculum learning or progressive sequence length increases
     """
     prefetch_size: int
     cache_dsn: str  # PostgreSQL DSN (e.g., postgresql://user:pass@host:port/db)
     shuffle_buffer: bool = False
     num_workers: int = 4
+    macro_batch_size: int
+    micro_batch_size: int
+    max_seq_len: int
     # Additional settings (e.g. timeouts) can be added here
 
 class TrainingDataConfig(BaseModel):
@@ -591,61 +588,72 @@ class TrainingDataConfig(BaseModel):
     settings: DataSettings
     urls: list[str]
 
-class Device(str, Enum):
+class Hardware(BaseModel):
     """
-    Enumeration of supported computation devices in the Vorox framework.
+    Configuration model for hardware acceleration and precision settings in the Vorox framework.
     
-    Defines the canonical set of hardware acceleration targets for neural network
-    operations, ensuring type safety and configuration validation for device placement.
+    Encapsulates parameters that control computation device selection, numerical precision,
+    and distributed training configuration for neural network operations.
     
     Architecture:
-        Inherits from both str and Enum to enable string serialization while maintaining
-        type safety. Implements a 1:1 mapping between enum members and string values
-        with O(1) lookup complexity for both directions.
+        Inherits from Pydantic's BaseModel for validation and serialization.
+        Implements a flat parameter structure with O(1) access complexity for all configuration
+        values. Parameters are validated at initialization time with type checking.
     
     Interface:
-        - cpu: Central Processing Unit device target
-          Standard fallback device available on all systems. Provides reliable but
-          slower execution for models of any size within system memory constraints.
-        - cuda: NVIDIA CUDA GPU device target
-          Enables hardware acceleration on NVIDIA GPUs via the CUDA platform.
-          Requires compatible NVIDIA hardware and drivers. Provides significant
-          performance improvements for parallel tensor operations.
-        - mps: Apple Metal Performance Shaders device target
-          Enables hardware acceleration on Apple Silicon and compatible AMD GPUs.
-          Available only on macOS systems with Metal API support. Provides
-          platform-specific optimization for Apple hardware.
+        - device (Literal["cpu", "cuda", "mps"]): Target computation device for tensor operations.
+          "cpu": Central Processing Unit device target. Standard fallback device available on all systems.
+          "cuda": NVIDIA CUDA GPU device target. Requires compatible NVIDIA hardware and drivers.
+          "mps": Apple Metal Performance Shaders device target. Available only on macOS systems.
+          Must be a valid device type supported by the current PyTorch installation.
+        - precision (Literal["fp32", "fp16", "bf16"]): Numerical precision for model weights and computations.
+          "fp32": 32-bit floating point precision. Standard precision with highest numerical stability.
+          "fp16": 16-bit floating point precision. Reduces memory usage and may increase performance.
+          "bf16": 16-bit brain floating point. Alternative format with better numerical stability than fp16.
+          Lower precision reduces memory usage but may introduce numerical instability.
+        - distributed (bool): Whether to enable distributed training across multiple devices.
+          When True, initializes distributed training environment using PyTorch's distributed package.
+          Default: False (single-device training).
+        - num_gpus (int): Number of GPU devices to use for distributed training.
+          Only relevant when distributed=True. Must not exceed available GPU count.
+          Default: 1 (single GPU).
     
     Behavior:
-        - Immutable after definition following Python's Enum pattern
-        - Thread-safe for all operations
-        - String-serializable for configuration files via the str inheritance
-        - Hashable for use as dictionary keys
-        - Values correspond directly to PyTorch device strings
+        - Immutable after initialization following Pydantic's data model pattern
+        - Thread-safe for read operations
+        - No internal state management beyond the configured properties
+        - Validation occurs at initialization time with type checking
     
     Integration:
-        - Used in Config model to specify the target computation device
-        - Consumed by model initialization and data pipeline to place tensors
-          on the appropriate device
-        - Directly maps to torch.device strings in PyTorch operations
+        - Initialized via Pydantic's model_validate method from YAML/JSON configuration
+        - Used by model initialization and training loop to configure device placement
+        - Consumed by precision-aware operations for automatic mixed precision training
         - Example:
           ```
-          device_enum = Device.cuda
-          torch_device = torch.device(device_enum)
-          model = model.to(torch_device)
+          hardware_config = Hardware.model_validate({
+              "device": "cuda",
+              "precision": "fp16",
+              "distributed": False,
+              "num_gpus": 1
+          })
+          device = torch.device(hardware_config.device)
+          model = model.to(device)
           ```
+        - Used as a component in the main Config class to define hardware configuration
     
     Limitations:
-        - Limited to three primary device types; multi-GPU configurations require code changes
         - No automatic fallback mechanism if specified device is unavailable
-        - No support for distributed training across multiple devices
         - No validation for device availability at configuration time
         - No specification for device ordinals (e.g., cuda:0, cuda:1) for multi-device systems
+        - Limited distributed training configuration compared to PyTorch's full capabilities
+        - No support for model parallelism or pipeline parallelism strategies
+        - No validation for compatibility between precision and device (e.g., bf16 support)
         - MPS support may have feature limitations compared to CUDA implementation
     """
-    cpu = "cpu"
-    cuda = "cuda"
-    mps = "mps"
+    device: Literal["cpu", "cuda", "mps"]
+    precision: Literal["fp32", "fp16", "bf16"]
+    distributed: bool = False
+    num_gpus: int = 1
 
 class Config(BaseModel):
     """
@@ -663,21 +671,20 @@ class Config(BaseModel):
         all nested models with validation complexity of O(n).
     
     Interface:
-        - tokenizer (Tokenizer): Text tokenization configuration.
-          Controls token vocabulary and text encoding/decoding strategy.
-        - architecture (Architecture): Neural network structure parameters.
-          Defines transformer dimensions, depth, attention mechanism, and activation functions.
-          Determines model capacity, computational requirements, and theoretical capabilities.
+        - model (Model): Neural network structure and tokenization parameters.
+          Defines transformer dimensions, depth, attention mechanism, activation functions,
+          and tokenization strategy. Determines model capacity, computational requirements,
+          and theoretical capabilities.
         - optimizer (Optimizer): Gradient-based optimization configuration.
           Controls learning dynamics including step size, momentum, and regularization.
         - loss (Loss): Training objective function specification.
           Defines the mathematical criterion for model optimization.
         - train (Train): Training process parameters.
-          Controls batch sizing, sequence length, and iteration counts.
+          Controls iteration counts and evaluation strategy.
         - data (TrainingDataConfig): Data pipeline configuration.
-          Specifies data sources, preprocessing, caching, and loading parallelism.
-        - device (Device): Computation hardware target.
-          Determines tensor placement for model operations (CPU/GPU/MPS).
+          Specifies data sources, preprocessing, caching, batch sizing, and loading parallelism.
+        - hardware (Hardware): Computation hardware and precision configuration.
+          Determines tensor placement, numerical precision, and distributed training setup.
     
     Behavior:
         - Immutable after initialization following Pydantic's data model pattern
@@ -708,13 +715,12 @@ class Config(BaseModel):
         - No support for partial configuration updates; must be reconstructed for changes
         - No built-in configuration presets for common model architectures
     """
-    tokenizer: Tokenizer
-    architecture: Architecture
+    model: Model
     optimizer: Optimizer
     loss: Loss
     train: Train
     data: TrainingDataConfig
-    device: Device
+    hardware: Hardware
 
 if __name__ == "__main__":
     with open("configs/20M_test_model.yml", "r") as f:
