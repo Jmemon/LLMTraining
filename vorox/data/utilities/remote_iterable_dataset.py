@@ -19,8 +19,8 @@ import logging
 import torch
 from torch.utils.data import IterableDataset
 
-from data.remote_stream import open_remote
-from data.metadata_cache import MetadataCache
+from data.utilities.remote_stream import open_remote
+from data.utilities.metadata_cache import MetadataCache
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)  # For demonstration, set to DEBUG level.
