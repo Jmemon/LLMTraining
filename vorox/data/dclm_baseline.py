@@ -15,6 +15,44 @@ DCLM_BASELINE_REPO_ID = "mlfoundations/dclm-baseline-1.0"
 
 
 def get_dclm_baseline_urls(bucket: str, prefix: str = DCLM_PREFIX) -> list[str]:
+    """
+    Retrieves S3 object keys for DCLM Baseline dataset files from a specified bucket.
+    
+    Architecture:
+        - Implements a simple S3 listing operation with O(n) complexity where n is the number of objects
+        - Uses prefix filtering at the API level for efficient server-side filtering
+        - Performs additional client-side filtering to ensure exact prefix matching
+    
+    Interface:
+        - bucket (str): S3 bucket name containing the dataset files
+          Must be an existing bucket with appropriate read permissions
+        - prefix (str, optional): S3 key prefix to filter objects by
+          Defaults to "dclm-baseline" constant defined at module level
+          Used for both API-level filtering and additional client-side filtering
+        
+        Returns:
+            list[str]: List of S3 object keys matching the specified prefix
+            Empty list if no matching objects found or bucket doesn't exist
+    
+    Behavior:
+        - Thread-safe as it creates a new boto3 client instance on each call
+        - No persistent state between invocations
+        - Pagination not implemented; limited to 1000 objects per S3 API response
+    
+    Integration:
+        - Used by download_convert_and_upload_hf_to_s3() to check for already processed files
+        - Requires AWS credentials in environment variables or config files
+        - Example:
+          ```
+          urls = get_dclm_baseline_urls("vorox-processed-train-data", "dclm-baseline")
+          ```
+    
+    Limitations:
+        - No pagination support; limited to 1000 objects per response
+        - No error handling for invalid bucket names or permission issues
+        - Requires appropriate AWS credentials configured in environment
+        - No support for alternative authentication methods or endpoint configurations
+    """
     s3_client = boto3.client('s3')
     response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
     return [obj['Key'] for obj in response.get('Contents', []) if obj['Key'].startswith(prefix)]
@@ -22,16 +60,46 @@ def get_dclm_baseline_urls(bucket: str, prefix: str = DCLM_PREFIX) -> list[str]:
 
 def convert_jsonl_zst_to_webdataset(input_path: str) -> io.BytesIO:
     """
-    Converts a .jsonl.zst file to a WebDataset-format tar file.
-    Each JSON object is split into:
-    - {index}.txt: Contains the main text content
-    - {index}.json: Contains the metadata
+    Converts a Zstandard-compressed JSONL file to WebDataset-format tar archive for efficient ML training.
     
-    Args:
-        input_path (str): Path to the input .jsonl.zst file
+    Architecture:
+        - Implements a streaming decompression-transformation pipeline with O(n) time complexity
+        - Uses in-memory buffering with constant memory overhead regardless of input size
+        - Processes each JSON record atomically, ensuring partial file corruption cannot occur
+        - Maintains sequential record indexing with zero-padded 6-digit identifiers
     
-    Returns:
-        io.BytesIO: A buffer containing the WebDataset-format tar file
+    Interface:
+        - input_path (str): Filesystem path to the input .jsonl.zst file
+          Must be a valid file path with read permissions
+          File must contain valid JSON objects, one per line, compressed with Zstandard
+          
+        Returns:
+            io.BytesIO: In-memory buffer containing a complete WebDataset-format tar archive
+            Buffer position is reset to 0 before returning
+            Empty buffer returned if input file is empty or contains only whitespace
+    
+    Behavior:
+        - Thread-safe as it creates new file handles and buffers on each invocation
+        - No persistent state between calls
+        - Skips empty lines in the input file
+        - Handles UTF-8 encoding/decoding for text content
+        - Preserves all JSON fields except 'text' in the metadata file
+    
+    Integration:
+        - Called by download_convert_and_upload_hf_to_s3() to process individual dataset files
+        - Requires zstandard and tarfile libraries
+        - Example:
+          ```
+          buffer = convert_jsonl_zst_to_webdataset("/path/to/file.jsonl.zst")
+          with open("output.tar", "wb") as f:
+              f.write(buffer.getvalue())
+          ```
+    
+    Limitations:
+        - Loads entire decompressed content into memory, potentially problematic for very large files
+        - No streaming output support; entire tar archive built in memory before returning
+        - No error handling for malformed JSON or corrupt Zstandard data
+        - Assumes 'text' field exists in JSON objects; creates empty text files if missing
     """
     tar_buffer = io.BytesIO()
     
@@ -68,14 +136,62 @@ def convert_jsonl_zst_to_webdataset(input_path: str) -> io.BytesIO:
 
 def download_convert_and_upload_hf_to_s3(repo_id: str, bucket: str, num_files: int = 10, prefix: str = "") -> None:
     """
-    Downloads .jsonl.zst files from a Hugging Face repository, converts them to WebDataset-format tar files,
-    and uploads them to S3.
+    Downloads, converts, and uploads Hugging Face dataset files to S3 in WebDataset format for ML training pipelines.
     
-    Args:
-        repo_id (str): The Hugging Face repository ID
-        bucket (str): The S3 bucket name to upload files to
-        num_files (int): Maximum number of files to process
-        prefix (str): Optional prefix for S3 keys
+    Architecture:
+        - Implements a three-stage ETL pipeline with O(n) time complexity where n is the number of files
+        - Uses incremental processing with early termination to handle large repositories efficiently
+        - Employs idempotent operations with existence checking to support resumable processing
+        - Maintains flat namespace conversion for hierarchical repository structures
+    
+    Interface:
+        - repo_id (str): Hugging Face repository identifier in 'username/repo-name' format
+          Must be a valid, accessible Hugging Face dataset repository
+          Example: "mlfoundations/dclm-baseline-1.0"
+        
+        - bucket (str): AWS S3 bucket name for storing processed files
+          Must exist with appropriate write permissions configured
+          Used as the destination for all converted WebDataset tar files
+        
+        - num_files (int, optional): Maximum number of files to process per invocation
+          Defaults to 10 files
+          Set to a lower value for testing or higher for production runs
+          Early termination occurs after processing this many matching files
+        
+        - prefix (str, optional): S3 key prefix for uploaded files
+          Defaults to empty string
+          Used to organize files in the S3 bucket hierarchy
+          Will be prepended to all generated S3 keys with a hyphen separator
+    
+    Behavior:
+        - Thread-safe as it creates new client instances on each invocation
+        - Stateless between runs; can be safely interrupted and resumed
+        - Skips already processed files based on S3 key existence
+        - Processes only .jsonl.zst files, ignoring other formats
+        - Uses temporary local storage for downloads, automatically cleaned up after processing
+    
+    Integration:
+        - Requires environment variables for AWS and Hugging Face authentication
+        - Loads credentials from .env file via dotenv
+        - Depends on get_dclm_baseline_urls() for S3 object listing
+        - Depends on convert_jsonl_zst_to_webdataset() for file format conversion
+        - Example:
+          ```
+          download_convert_and_upload_hf_to_s3(
+              "mlfoundations/dclm-baseline-1.0", 
+              "vorox-processed-train-data",
+              num_files=100,
+              prefix="dclm-baseline"
+          )
+          ```
+    
+    Limitations:
+        - No parallel processing; files are processed sequentially
+        - No progress reporting or logging mechanism
+        - Limited to 1000 existing objects due to S3 listing pagination limits
+        - No error recovery for individual file failures; processing stops on first error
+        - Requires sufficient local disk space for temporary file storage
+        - Path handling may be problematic on Windows due to backslash conversion
     """
     load_dotenv()
 

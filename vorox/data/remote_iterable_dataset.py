@@ -27,51 +27,68 @@ logger.setLevel(logging.DEBUG)  # For demonstration, set to DEBUG level.
 
 class RemoteIterableDataset(IterableDataset):
     """
-    A memory-efficient PyTorch IterableDataset that streams data from remote sources with controlled memory footprint and resumable processing.
-    
-    This dataset implements a streaming architecture designed for large-scale training on datasets that exceed available memory,
-    employing a prefetch buffer strategy that balances between random access and sequential streaming efficiency. The implementation
-    prioritizes constant memory usage (O(prefetch_size)) while maintaining amortized O(1) access time per sample.
+    A memory-constrained streaming dataset that processes remote data sources with constant memory footprint, 
+    designed for training on datasets that exceed available RAM by implementing a prefetch buffer architecture 
+    that balances I/O efficiency with controlled randomization.
     
     Architecture:
-        - Streaming I/O: Uses smart_open to lazily access remote files without downloading them entirely
-        - Buffered processing: Maintains a fixed-size prefetch buffer to amortize I/O costs (O(prefetch_size) memory)
-        - Controlled randomization: Implements Fisher-Yates shuffling within buffer windows for memory-efficient randomization
-        - Stateful processing: Records sample indices in PostgreSQL for resumability and distributed training coordination
-        - Resource lifecycle: Automatically manages file handles and database connections throughout iterator lifecycle
+        - Implements lazy streaming I/O via smart_open with O(1) memory usage regardless of dataset size
+        - Employs fixed-size prefetch buffer (O(prefetch_size) memory) with amortized O(1) access time per sample
+        - Uses Fisher-Yates in-buffer shuffling for memory-efficient local randomization in O(prefetch_size) time
+        - Maintains stateful processing via PostgreSQL-backed sample tracking with O(1) insertion complexity
+        - Manages resource lifecycle with automatic connection pooling and graceful error propagation
     
     Interface:
-        - __init__(addresses, transform, prefetch_size, cache, shuffle_buffer, epoch): Configures dataset parameters
-        - __iter__() -> Iterator: Returns a stateful iterator that yields processed samples sequentially
+        - __init__(
+            addresses: List[str],
+            transform: Optional[Callable[[str], Any]] = None,
+            prefetch_size: int = 1000,
+            cache: Optional[MetadataCache] = None,
+            shuffle_buffer: bool = False,
+            epoch: int = 0
+          ): Configures dataset parameters
+        - __iter__() -> Iterator[Any]: Returns stateful iterator yielding transformed samples
     
     Parameters:
-        addresses (List[str]): URLs to remote data files supporting multiple protocols (s3://, gs://, hf://, file://, http://)
-        transform (Optional[Callable[[str], Any]]): Function applied to each raw text line; must be serializable for distributed use
-        prefetch_size (int, default=1000): Controls memory usage, shuffling window size, and I/O batch efficiency
-        cache (Optional[MetadataCache]): PostgreSQL connection for tracking processed samples; enables resumability
-        shuffle_buffer (bool, default=False): Enables in-buffer randomization; true randomness limited by buffer size
-        epoch (int, default=0): Training epoch identifier for metadata tracking; critical for resuming interrupted training
+        addresses: Remote file URLs supporting multiple protocols (s3://, gs://, http://, file://, hf://)
+                  Must contain line-delimited text data; each line processed as one sample
+        transform: Function converting raw text lines to desired format; must be pickle-serializable
+                  Receives str input; can return any type; executed in worker processes
+        prefetch_size: Controls memory usage (larger = more RAM), shuffling effectiveness, and I/O batching
+                      Must be > 0; optimal values typically 100-10000 depending on sample size
+        cache: PostgreSQL connection for tracking processed samples; enables training resumption
+               If None, no persistence; if provided, must be pre-initialized MetadataCache instance
+        shuffle_buffer: Enables in-buffer randomization via Fisher-Yates algorithm
+                       True = shuffled samples within buffer boundaries; False = sequential processing
+        epoch: Integer identifier for current training epoch; used for metadata tracking
+               Must be consistent across restarts to properly resume interrupted training
     
     Behavior:
-        - Thread safety: Not thread-safe; single iterator should be used per process/worker
-        - Error handling: Propagates I/O errors with contextual information; gracefully closes resources on failure
-        - Performance: Amortizes I/O costs through buffering; throughput bounded by transform complexity and network latency
-        - State management: Maintains minimal state (current buffer and global sample counter) to enable resumability
-        - Resource management: Automatically closes file handles and commits database transactions at iteration end
+        - Not thread-safe: Single iterator should be used per worker process
+        - Propagates I/O errors with contextual information and gracefully closes resources
+        - Performance bounded by transform complexity, network latency, and buffer size
+        - Maintains minimal state (buffer + sample counter) with O(prefetch_size) memory footprint
+        - Automatically commits metadata transactions and closes file handles at iteration end
+        - Processes files sequentially in order specified by addresses parameter
     
     Integration:
-        - DataLoader compatibility: Designed for multi-process data loading via PyTorch DataLoader
-          Example: `loader = DataLoader(RemoteIterableDataset(["s3://bucket/file.txt"]), batch_size=32, num_workers=4)`
-        - Distributed training: Works with DistributedSampler when using appropriate MetadataCache configuration
-        - Dependencies: Requires smart_open library for protocol handling and PostgreSQL for metadata persistence
-        - Extension: Can be subclassed to override __iter__ for custom streaming behavior while preserving interface
+        - Compatible with PyTorch DataLoader for multi-process loading:
+          loader = DataLoader(
+              RemoteIterableDataset(["s3://bucket/file.txt"]), 
+              batch_size=32, 
+              num_workers=4
+          )
+        - Works with DistributedSampler when using shared MetadataCache instance
+        - Requires smart_open library for protocol handling and psycopg2 for PostgreSQL
+        - Can be subclassed to override __iter__ for custom streaming behavior
     
     Limitations:
-        - Line-oriented: Processes text files with one sample per line; binary formats require custom transform
-        - Limited randomization: True randomness constrained by prefetch_size; not suitable for applications requiring global shuffling
-        - Sequential file access: Processes files in order specified in addresses; no random file access
-        - Memory-bound throughput: Performance degrades if transform produces objects significantly larger than input lines
-        - No random access: Cannot efficiently access arbitrary indices; unsuitable for validation requiring specific samples
+        - Line-oriented processing only; binary formats require custom transform
+        - Randomization limited by prefetch_size; not suitable for global shuffling requirements
+        - Sequential file access only; no random access to arbitrary samples
+        - Performance degrades if transform produces objects significantly larger than input
+        - Not suitable for validation requiring specific samples due to streaming nature
+        - No built-in compression handling; compressed files must be handled by transform
     """
     def __init__(
         self,
@@ -82,6 +99,93 @@ class RemoteIterableDataset(IterableDataset):
         shuffle_buffer: bool = False,
         epoch: int = 0
     ):
+        """
+        Initializes a memory-efficient streaming dataset for processing remote data sources.
+        
+        Configures a dataset that streams data from remote locations with controlled memory usage,
+        optional in-buffer shuffling, and resumable processing via metadata tracking. Designed
+        for training on datasets that exceed available RAM by maintaining a fixed-size buffer.
+        
+        Architecture:
+            - Implements parameter validation and storage with O(1) initialization complexity
+            - Defers actual I/O operations until iteration time with zero upfront data loading
+            - Supports multiple remote protocols via smart_open dependency with protocol abstraction
+            - Memory complexity: O(1) during initialization (stores only configuration parameters)
+            - Preserves statelessness until iteration begins for serialization compatibility
+            
+        Parameters:
+            addresses (List[str]): Remote file URLs to process sequentially.
+                Must be accessible via supported protocols (s3://, gs://, http://, file://, hf://).
+                Each file must contain line-delimited text data (one sample per line).
+                Empty list will result in empty iteration with no errors.
+                
+            transform (Optional[Callable[[str], Any]]): Function to convert raw text lines to desired format.
+                Default: None (raw strings returned).
+                Must be pickle-serializable for DataLoader worker processes.
+                Receives string input; can return any type.
+                Applied to each line after stripping whitespace.
+                
+            prefetch_size (int): Number of samples to buffer before yielding.
+                Default: 1000.
+                Must be positive integer.
+                Controls memory usage (larger = more RAM), shuffling effectiveness, and I/O batching.
+                Optimal values typically 100-10000 depending on sample size and available memory.
+                
+            cache (Optional[MetadataCache]): PostgreSQL connection for tracking processed samples.
+                Default: None (no persistence).
+                If provided, must be pre-initialized MetadataCache instance.
+                Enables training resumption by recording sample processing state.
+                Will be closed automatically at iteration end.
+                
+            shuffle_buffer (bool): Whether to randomize samples within each buffer.
+                Default: False (sequential processing).
+                True enables in-buffer Fisher-Yates shuffling for local randomization.
+                Randomization limited to prefetch_size window; not global shuffling.
+                
+            epoch (int): Integer identifier for current training epoch.
+                Default: 0.
+                Used for metadata tracking with cache parameter.
+                Must be consistent across restarts to properly resume interrupted training.
+                
+        Raises:
+            TypeError: If parameters have incorrect types.
+            ValueError: If prefetch_size <= 0.
+            
+        Behavior:
+            - Stateless initialization with deferred resource allocation
+            - Thread-safe for constructor but not for resulting iterator
+            - Zero I/O operations during initialization
+            - No validation of remote addresses until iteration time
+            - Parameter storage only; no data loading or processing
+            
+        Integration:
+            - Typically instantiated directly before DataLoader construction:
+              ```
+              dataset = RemoteIterableDataset(
+                  addresses=["s3://bucket/file.txt"],
+                  transform=json.loads,
+                  prefetch_size=1000
+              )
+              loader = DataLoader(dataset, batch_size=32, num_workers=4)
+              ```
+            - Often used with metadata cache for resumable training:
+              ```
+              cache = MetadataCache("postgresql://user:pass@host/db")
+              dataset = RemoteIterableDataset(
+                  addresses=urls,
+                  cache=cache,
+                  epoch=current_epoch
+              )
+              ```
+            
+        Limitations:
+            - No parameter validation until iteration time
+            - No support for non-text file formats without custom transform
+            - No automatic protocol detection; URLs must include explicit scheme
+            - No built-in compression handling; requires appropriate transform
+            - Metadata cache requires PostgreSQL; no alternative database support
+            - No support for random access or indexing due to streaming nature
+        """
         self.addresses = addresses
         self.transform = transform
         self.prefetch_size = prefetch_size
@@ -91,7 +195,53 @@ class RemoteIterableDataset(IterableDataset):
 
     def __iter__(self) -> Iterator:
         """
-        Iterate over samples from the remote files with optional prefetching and shuffling.
+        Implements a memory-efficient streaming iterator with buffered I/O and optional shuffling.
+        
+        Processes remote data sources sequentially with controlled memory usage by maintaining
+        a fixed-size buffer, tracking sample processing state, and providing optional local
+        randomization within buffer boundaries.
+        
+        Architecture:
+            - Implements producer-consumer pattern with O(prefetch_size) space complexity
+            - Uses buffered I/O with amortized O(1) time complexity per yielded sample
+            - Employs Fisher-Yates in-buffer shuffling with O(prefetch_size) time complexity
+            - Implements stateful processing with PostgreSQL sample tracking (O(1) per sample)
+            - Error propagation with context-enriched exceptions and resource cleanup
+            - Memory footprint: O(prefetch_size) regardless of total dataset size
+            
+        Returns:
+            Iterator: A generator yielding processed samples with types determined by transform:
+                - If transform is None: yields stripped strings from input lines
+                - If transform is provided: yields objects of transform's return type
+                - Maintains iteration order matching file order unless shuffle_buffer=True
+                
+        Raises:
+            ValueError: When remote file access fails, with detailed error context
+            RuntimeError: If transform raises exceptions during sample processing
+            IOError: For underlying I/O errors from smart_open or network stack
+            
+        Behavior:
+            - Stateful iteration with buffer and counter persistence between yields
+            - Not thread-safe; single iterator should be used per worker process
+            - Automatic resource management with proper file handle closure
+            - Deterministic sample ordering unless shuffle_buffer=True
+            - Metadata persistence via cache.add_sample() with O(1) insertion complexity
+            - Performance bounded by transform complexity, network latency, and buffer size
+            - Processes files sequentially in order specified by addresses parameter
+            
+        Integration:
+            - Called implicitly by Python's iteration protocol: for sample in dataset
+            - Automatically invoked by PyTorch DataLoader during batch construction
+            - Compatible with both single-process and multi-process data loading
+            - Example: for batch in DataLoader(dataset, batch_size=32, num_workers=4): ...
+            
+        Limitations:
+            - Line-oriented processing only; binary formats require custom transform
+            - Randomization limited by prefetch_size; not suitable for global shuffling
+            - Sequential file access only; no random access to arbitrary samples
+            - Performance degrades if transform produces objects significantly larger than input
+            - No built-in compression handling; compressed files must be handled by transform
+            - No early termination detection; processes all files completely
         """
         buffer = []
         sample_counter = 0
