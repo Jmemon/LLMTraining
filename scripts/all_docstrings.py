@@ -64,13 +64,11 @@ def main():
     )
     parser.add_argument(
         "src_dir", 
-        nargs="?", 
-        default="vorox",
-        help="Source directory to process (default: vorox)"
+        help="Source directory to process"
     )
     args = parser.parse_args()
     
-    src_dir = Path(args.src_dir)
+    src_dir = Path(args.src_dir).resolve()
     docstring_utility = Path.home() / "Desktop" / "utilities" / "create_docstring.py"
     
     # Verify the source directory exists
