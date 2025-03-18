@@ -99,6 +99,8 @@ class Hardware(BaseModel):
     num_gpus: int = 1
 
 class Config(BaseModel):
+    experiment_name: str
+    seed: int
     model: Model
     optimizer: Optimizer
     loss: Loss
