@@ -1,5 +1,6 @@
 from enum import Enum
-from typing import Optional, Literal, List
+from typing import Optional, Literal, List, Union
+from pathlib import Path
 from pydantic import BaseModel
 import yaml
 
@@ -56,16 +57,21 @@ class Dataset(str, Enum):
     dolma = "dolma"
     redpajama = "redpajama"
 
+class EvaluatorType(str, Enum):
+    mmlu = "mmlu"
+    gsm8k = "gsm8k"
+    gsm_symbolic = "gsm_symbolic"
+    arc_agi = "arc_agi"
+
 class Data(BaseModel):
     prefetch_size: int
-    cache_dsn: str  # PostgreSQL DSN (e.g., postgresql://user:pass@host:port/db)
     shuffle_buffer: bool = False
     num_workers: int = 4
     macro_batch_size: int
     micro_batch_size: int
     max_seq_len: int
-    train_data: List[Dataset]
-    val_data: List[Dataset]
+    train_data: Union[List[Path], None] = None
+    evaluators: Union[List[EvaluatorType], None] = ["mmlu"]
     # Additional settings (e.g. timeouts) can be added here
 
 class Metrics(BaseModel):
