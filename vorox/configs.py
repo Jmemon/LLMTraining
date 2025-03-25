@@ -42,8 +42,6 @@ class OptimizerConfig(BaseModel):
     gradient_clip_val: float = 1.0
 
 class LossType(str, Enum):
-    mse = "mse"
-    cross_entropy = "cross_entropy"
     perplexity = "perplexity"
 
 class LossConfig(BaseModel):

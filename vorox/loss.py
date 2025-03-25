@@ -24,7 +24,7 @@ class LossBase:
             Returns:
                 Instantiated nn.Module loss function ready for use in training
             Raises:
-                No explicit exceptions, but will propagate any from nn.MSELoss or nn.CrossEntropyLoss
+                No explicit exceptions, but will propagate any from nn.CrossEntropyLoss
                 
     Behavior:
         - Thread-safe due to stateless design with no shared mutable state
@@ -68,13 +68,11 @@ class LossBase:
         Args:
             cfg (Config): Configuration object containing loss settings.
                 Must include cfg.loss.type field with a value from the LossType enum
-                ("mse", "cross_entropy", or "perplexity").
+                (currently only "perplexity").
         
         Returns:
             nn.Module: Instantiated loss function module ready for integration into
-                training loops. Return type varies based on the requested loss:
-                - nn.MSELoss for "mse"
-                - nn.CrossEntropyLoss for both "cross_entropy" and "perplexity"
+                training loops. Currently always returns nn.CrossEntropyLoss.
         
         Behavior:
             - Thread-safe due to stateless design with no shared mutable state
@@ -99,7 +97,5 @@ class LossBase:
             - No explicit handling for numerical stability issues in loss computation
             - No support for loss function composition or weighted combinations
         """
-        if cfg.loss.type == LossType.mse:
-            return nn.MSELoss()
-        elif cfg.loss.type == LossType.cross_entropy or cfg.loss.type == LossType.perplexity:
+        if cfg.loss.type == LossType.perplexity:
             return nn.CrossEntropyLoss()
