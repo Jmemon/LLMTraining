@@ -44,7 +44,30 @@ class GSMSymbolicEvaluator(EvaluatorBase):
     def __call__(self, model: nn.Module) -> dict:
         for batch in self.dataloader:
             for sample in batch:
-                # run model inference on sample["prompt"]
-                # compare predicted vs sample["ground_truth"]
+                # Run model inference using model's __call__ function
+                prompt = sample["prompt"]
+                model_output = model(prompt)
+                
+                # Extract the final answer from model output
+                # Look for the pattern "#### <answer>" at the end
+                import re
+                predicted_answer = None
+                match = re.search(r"####\s*([\d\.\-+]+)", model_output)
+                if match:
+                    predicted_answer = match.group(1).strip()
+                
+                # Extract ground truth answer
+                ground_truth = sample["ground_truth"]
+                correct_answer = None
+                match = re.search(r"####\s*([\d\.\-+]+)", ground_truth)
+                if match:
+                    correct_answer = match.group(1).strip()
+                
+                # Compare answers
+                if predicted_answer is not None and correct_answer is not None:
+                    if predicted_answer == correct_answer:
+                        self.performance_breakdown["all"]["num_correct"] += 1
+                
                 self.performance_breakdown["all"]["num_total"] += 1
+                
         return self.performance_breakdown

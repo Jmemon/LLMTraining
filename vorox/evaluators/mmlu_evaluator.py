@@ -70,14 +70,20 @@ class MMLUEvaluator(EvaluatorBase):
                 if subject not in self.performance_breakdown:
                     self.performance_breakdown[subject] = {"num_correct": 0, "num_total": 0}
 
-                # 1) Model inference:
-                #    model_output = model.generate(sample["prompt"])  # however you run inference
-
-                # 2) Convert model output to predicted choice
-                #    pred_idx = figure_out_predicted_choice(...) 
-
-                # 3) Compare pred_idx with sample["correct_idx"]
-                #    if pred_idx == sample["correct_idx"]:
-                #        self.performance_breakdown[subject]["num_correct"] += 1
+                # 1) Model inference using the model's __call__ function
+                prompt = sample["prompt"]
+                model_output = model(prompt)
+                
+                # 2) Extract the first letter from the model output (A, B, C, or D)
+                # Strip whitespace and get the first character
+                predicted_letter = model_output.strip()[0].upper()
+                
+                # 3) Compare predicted letter with correct letter
+                correct_letter = sample["correct_letter"]
+                
+                if predicted_letter == correct_letter:
+                    self.performance_breakdown[subject]["num_correct"] += 1
+                
                 self.performance_breakdown[subject]["num_total"] += 1
+                
         return self.performance_breakdown

@@ -46,8 +46,30 @@ class GSM8KEvaluator(EvaluatorBase):
     def __call__(self, model: nn.Module) -> dict:
         for batch in self.dataloader:
             for sample in batch:
-                # Run inference, compare predicted answer to sample["ground_truth"]
-                # Possibly parse out "#### <answer>" at the end of ground_truth
-                # Update counts in self.performance_breakdown["all"]
+                # Run inference using model's __call__ function
+                prompt = sample["prompt"]
+                model_output = model(prompt)
+                
+                # Extract the final answer from model output
+                # Look for the pattern "#### <number>" at the end
+                import re
+                predicted_answer = None
+                match = re.search(r"####\s*([\d\.\-+]+)", model_output)
+                if match:
+                    predicted_answer = match.group(1).strip()
+                
+                # Extract ground truth answer
+                ground_truth = sample["ground_truth"]
+                correct_answer = None
+                match = re.search(r"####\s*([\d\.\-+]+)", ground_truth)
+                if match:
+                    correct_answer = match.group(1).strip()
+                
+                # Compare answers
+                if predicted_answer is not None and correct_answer is not None:
+                    if predicted_answer == correct_answer:
+                        self.performance_breakdown["all"]["num_correct"] += 1
+                
                 self.performance_breakdown["all"]["num_total"] += 1
+                
         return self.performance_breakdown
