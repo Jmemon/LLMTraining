@@ -27,15 +27,30 @@ class MMLUEvaluator(EvaluatorBase):
             for shot in self.few_shot_examples:
                 # shot["question"], shot["choices"], shot["answer"], shot["subject"]
                 correct_choice_idx = shot["answer"]
-                correct_choice_text = shot["choices"][correct_choice_idx]
+                correct_letter = chr(65 + correct_choice_idx)  # 0->A, 1->B, 2->C, 3->D
+                
+                # Format choices as A, B, C, D options
+                choices_text = ""
+                for i, choice in enumerate(shot["choices"]):
+                    letter = chr(65 + i)  # A, B, C, D
+                    choices_text += f"{letter}. {choice} "
+                
                 prompt_prefix += (
                     f"Q: {shot['question']}\n"
-                    f"Choices: {shot['choices']}\n"
-                    f"A: The correct answer is {correct_choice_text}\n\n"
+                    f"Choices: {choices_text}\n"
+                    f"A: {correct_letter}\n\n"
                 )
-            prompt_prefix += f"Q: {example['question']}\nChoices: {example['choices']}\nA: "
+            
+            # Format choices as A, B, C, D options for the current example
+            choices_text = ""
+            for i, choice in enumerate(example["choices"]):
+                letter = chr(65 + i)  # A, B, C, D
+                choices_text += f"{letter}. {choice} "
+                
+            prompt_prefix += f"Q: {example['question']}\nChoices: {choices_text}\nA: "
             example["prompt"] = prompt_prefix
             example["correct_idx"] = example["answer"]
+            example["correct_letter"] = chr(65 + example["answer"])  # Store correct letter (A, B, C, D)
             return example
 
         self.dataset = self.dataset.map(create_prompt)
