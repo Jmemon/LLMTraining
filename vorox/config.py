@@ -13,7 +13,7 @@ class ActivationType(str, Enum):
     silu = "silu"
     swiglu = "swiglu"
 
-class Model(BaseModel):
+class ModelConfig(BaseModel):
     tokenizer_name: str
     n_layers: int
     d_model: int
@@ -29,7 +29,7 @@ class OptimizerType(str, Enum):
     adam = "adam"
     sgd = "sgd"
 
-class Optimizer(BaseModel):
+class OptimizerConfig(BaseModel):
     type: OptimizerType
     lr: float
     betas: list[float]
@@ -45,10 +45,10 @@ class LossType(str, Enum):
     cross_entropy = "cross_entropy"
     perplexity = "perplexity"
 
-class Loss(BaseModel):
+class LossConfig(BaseModel):
     name: LossType
 
-class Train(BaseModel):
+class TrainConfig(BaseModel):
     epochs: int
 
 class DatasetType(str, Enum):
@@ -63,7 +63,13 @@ class EvaluatorType(str, Enum):
     gsm_symbolic = "gsm_symbolic"
     arc_agi = "arc_agi"
 
-class Data(BaseModel):
+class EvaluatorConfig(BaseModel):
+    evaluators: List[EvaluatorType]
+    batch_size: int
+    num_workers: int
+    prefetch_size: int
+
+class DataConfig(BaseModel):
     prefetch_size: int
     shuffle_buffer: bool = False
     num_workers: int = 4
@@ -71,10 +77,9 @@ class Data(BaseModel):
     micro_batch_size: int
     max_seq_len: int
     train_data: Union[List[DatasetType], None] = None
-    evaluators: Union[List[EvaluatorType], None] = ["mmlu"]
     # Additional settings (e.g. timeouts) can be added here
 
-class Metrics(BaseModel):
+class MetricsConfig(BaseModel):
     compute_metrics: bool
     train_metrics: List[Literal["loss"]]
     val_metrics: List[Literal["loss"]]
@@ -83,14 +88,14 @@ class Metrics(BaseModel):
     early_stopping_patience: int
     early_stopping_min_delta: float
 
-class Logging(BaseModel):
+class LoggingConfig(BaseModel):
     wandb_project: str
     wandb_entity: Optional[str] = None
     wandb_run_name: Optional[str] = None
     wandb_tags: List[str] = []
     log_every_n_steps: int = 50
 
-class Checkpoint(BaseModel):
+class CheckpointConfig(BaseModel):
     save_top_k: int = 3
     checkpoint_dir: str
     monitor: str = "val/loss"
@@ -99,27 +104,28 @@ class Checkpoint(BaseModel):
     save_every_n_steps: int = 1000
     load_from_checkpoint: Optional[str] = None
 
-class Hardware(BaseModel):
+class HardwareConfig(BaseModel):
     device: Literal["cpu", "cuda", "mps"]
     precision: Literal["fp32", "fp16", "bf16"]
     distributed: bool = False
     num_gpus: int = 1
 
-class Config(BaseModel):
+class RunConfig(BaseModel):
     experiment_name: str
     seed: int
-    model: Model
-    optimizer: Optimizer
-    loss: Loss
-    train: Train
-    data: Data
-    hardware: Hardware
-    metrics: Metrics
-    logging: Logging
-    checkpoint: Checkpoint
+    model: ModelConfig
+    optimizer: OptimizerConfig
+    loss: LossConfig
+    train: TrainConfig
+    data: DataConfig
+    hardware: HardwareConfig
+    metrics: MetricsConfig
+    logging: LoggingConfig
+    checkpoint: CheckpointConfig
+    eval: EvaluatorConfig
 
 if __name__ == "__main__":
     with open("configs/20M_test_model.yml", "r") as f:
-        cfg = Config.model_validate(yaml.safe_load(f))
+        cfg = RunConfig.model_validate(yaml.safe_load(f))
 
     print(cfg)
