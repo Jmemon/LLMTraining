@@ -1,8 +1,8 @@
+experiment_name: "vorox_20M_test"
+seed: 42
 
-tokenizer:
-  name: "google-bert/bert-base-uncased"
-
-architecture:
+model:
+  tokenizer_name: "google-bert/bert-base-uncased"
   n_layers: 4
   d_model: 256
   n_heads: 8
@@ -17,32 +17,54 @@ optimizer:
   lr: 1e-5
   betas: [0.9, 0.999]
   weight_decay: 0.01
+  gradient_clip_val: 1.0
+  warmup_steps: 100
+  scheduler: "cosine"
 
 loss:
-  type: perplexity
+  name: perplexity
 
 train:
   epochs: 10
+
+data:
+  prefetch_size: 10000
+  shuffle_buffer: false
+  num_workers: 4
   macro_batch_size: 1024
   micro_batch_size: 64
   max_seq_len: 512
+  train_data: [dclm_baseline]
 
-device: cuda
+hardware:
+  device: cuda
+  precision: fp16
+  distributed: false
+  num_gpus: 1
 
-data:
-  settings:
-    prefetch_size: 10000
-    cache_dsn: None
-    shuffle_buffer: false
-    num_workers: 4
-  urls:
-    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000000_processed.tar"
-    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000001_processed.tar"
-    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000002_processed.tar"
-    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000003_processed.tar"
-    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000004_processed.tar"
-    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000005_processed.tar"
-    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000006_processed.tar"
-    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000007_processed.tar"
-    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000008_processed.tar"
-    - "https://vorox-processed-train-data.s3.us-east-2.amazonaws.com/dclm-baseline-global-shard_01_of_10_local-shard_0_of_10_shard_00000009_processed.tar"
+metrics:
+  compute_metrics: true
+  train_metrics: ["loss"]
+  early_stopping: true
+  early_stopping_patience: 3
+
+logging:
+  wandb_project: "vorox"
+  wandb_entity: null
+  wandb_tags: ["test", "20M"]
+  log_every_n_steps: 50
+
+checkpoint:
+  save_top_k: 3
+  checkpoint_dir: "./checkpoints"
+  monitor: mmlu
+  mode: max
+  save_last: true
+  save_every_n_steps: 1000
+
+eval:
+  evaluators: [mmlu, gsm8k]
+  batch_size: 16
+  num_workers: 2
+  prefetch_size: 4
+  val_check_interval: 1000
