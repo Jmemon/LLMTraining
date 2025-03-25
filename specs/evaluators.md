@@ -2,37 +2,38 @@
 # Evaluators
 
 ## High-Level Objective
+Implement evaluators for the following datasets:
+- MMLU
+- GSM8K
+- GSM-Symbolic
+That are easy to instantiate and run on a model.
 
 ## Mid-Level Objectives
+- Create EvaluatorBase class and file.
+- Create MMLUEvaluator class and file.
+- Create GSM8KEvaluator class and file.
+- Create GSMSymbolicEvaluator class and file.
+- Create EvaluatorBuilder class with build method and file.
 
 ## Implementation Notes
+Use the HuggingFace `datasets` library to load and process the datasets.
+Stream all datasets, do not download them locally. 
+Create a few-shot prompt template for each evaluator based on the structure of the dataset rows. Applied to every row using dataset.map.
 
 ## Context
 ### Beginning Context
-vorox/config.py (read-only)
+vorox/configs.py (read-only)
 
 ### Ending Context
-vorox/config.py (read-only)
+vorox/configs.py (read-only)
+vorox/evaluators/evaluator_base.py
+vorox/evaluators/mmlu_evaluator.py
+vorox/evaluators/gsm8k_evaluator.py
+vorox/evaluators/gsmsymbolic_evaluator.py
+vorox/evaluators/builder.py
 
 ## Low-Level Tasks
-1. Restructure config.py to have a new section for evaluators.
-```aider
-UPDATE vorox/config.py:
-    RENAME all config class names to have "Config" suffix
-
-    CREATE pydantic EvaluatorConfig(BaseModel):
-        evaluators: List[EvaluatorType]
-        batch_size: int
-        num_workers: int
-        prefetch_size: int
-
-    UPDATE Data:
-        DELETE evaluators: List[EvaluatorType]
-
-    UPDATE Config (rename to RunConfig):
-        ADD eval: EvaluatorsConfig
-```
-2. Create EvaluatorBase class and file.
+1. Create EvaluatorBase class and file.
 ```aider
 CREATE vorox/evaluators/evaluator_base.py:
     CREATE class EvaluatorBase:
@@ -67,6 +68,7 @@ CREATE vorox/evaluators/mmlu_evaluator.py:
             self.performance_breakdown = {} # first level maps subject to {num_correct: int, num_total: int}
             self.dataset = load_dataset(self.repo_id, subset="all", split="test")
             # rows have structure: {question: str, subject: str, choices: List[str], answer: int} (answer is index of correct choice)
+            Include a processing step that applies a prompt to each row to get a prompt and expected response. Use a few-shot prompt.
             self.dataloader = DataLoader(self.dataset, batch_size=config.batch_size, shuffle=False, prefetch_size=config.prefetch_size, num_workers=config.num_workers)
 
         CREATE def __call__(self, model: nn.Module) -> Dict[str, Dict[str, int]]:
@@ -82,19 +84,39 @@ CREATE vorox/evaluators/mmlu_evaluator.py:
 ```aider
 CREATE vorox/evaluators/gsm8k_evaluator.py:
     CREATE class GSM8KEvaluator(EvaluatorBase):
+        MIRROR MMLUEvaluator
+        repo_id = "openai/gsm8k"
+        each row has structure: {question: str, answer: str}  answer is expected response where last line is "#### <answer>"
+        Include a processing step that applies a prompt to each row to get a prompt and expected response.
+        subset="main", split="test"
+        Use "all" as the only subject in performance_breakdown.
+
 ```
 4. Create GSMSymbolicEvaluator class and file.
 ```aider
 CREATE vorox/evaluators/gsmsymbolic_evaluator.py:
     CREATE class GSMSymbolicEvaluator(EvaluatorBase):
+        MIRROR MMLUEvaluator
+        repo_id = "apple/GSM-Symbolic"
+        each row has two relevant fields: {question: str, answer: str}  answer is expected response where last line is "#### <answer>"
+        Include a processing step that applies a prompt to each row to get a prompt and expected response. Use the following template:
+        ```
+        As an expert problem solver, solve step by step the following mathematical questions.
+        Q: <SHOT_1_QUESTION>
+        A: Let's think step by step. <SHOT_1_ANSWER>. The final answer is <SHOT_1_FINAL_ANSWER>.
+        .
+        .
+        .
+        Q: <SHOT_8_QUESTION>
+        A: Let's think step by step. <SHOT_8_ANSWER>. The final answer is <SHOT_8_FINAL_ANSWER>.
+
+        Q: <TARGET_QUESTION>
+        A: Let's think step by step.
+        ```
+        subset="p1", split="test"
+        Use "all" as the only subject in performance_breakdown.
 ```
-5. Create ArcAGIEvaluator class and file.
-```aider
-CREATE vorox/evaluators/arc_agi_evaluator.py:
-    CREATE class ArcAGIEvaluator(EvaluatorBase):
-```
-```
-6. Create EvaluatorBuilder class with build method and file.
+5. Create EvaluatorBuilder class with build method and file.
 ```aider
 CREATE vorox/evaluators/builder.py:
     CREATE class EvaluatorBuilder:
@@ -108,10 +130,19 @@ CREATE vorox/evaluators/builder.py:
                     evaluators.append(GSM8KEvaluator())
                 elif eval_type == EvaluatorType.gsm_symbolic:
                     evaluators.append(GSMSymbolicEvaluator())
-                elif eval_type == EvaluatorType.arc_agi:
-                    evaluators.append(ArcAGIEvaluator())
                 else:
                     print(f"Invalid evaluator type received: {eval_type}")
 
             return evaluators
+```
+6. Update configs/20M_test_model.yaml to include evaluators.
+```aider
+UPDATE vorox/configs/20M_test_model.yaml:
+    ADD evaluators: [mmlu, gsm8k, gsm_symbolic]
+```
+7. Update train.py to include evaluators.
+```aider
+UPDATE scripts/train.py:
+    ADD evaluator building using EvaluatorBuilder.
+    Dont do anything with them yet, just build them.
 ```
