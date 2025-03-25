@@ -1,8 +1,9 @@
 from enum import Enum
 from typing import Optional, Literal, List, Union
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 import yaml
+import torch
 
 
 
@@ -108,6 +109,31 @@ class HardwareConfig(BaseModel):
     precision: Literal["fp32", "fp16", "bf16"]
     distributed: bool = False
     num_gpus: int = 1
+    
+    @field_validator("device")
+    def device_exists(cls, device):
+        if device == "cuda" and not torch.cuda.is_available():
+            raise ValueError("CUDA device requested but not available")
+        elif device == "mps" and not torch.backends.mps.is_available():
+            raise ValueError("MPS device requested but not available")
+        return device
+    
+    @field_validator("precision")
+    def valid_precision_device_combo(cls, field_value, info):
+        device = info.data.get("device")
+        precision = field_value
+        
+        if device == "cpu" and precision in ["fp16", "bf16"]:
+            raise ValueError(f"Precision {precision} not supported on CPU. Use fp32 instead.")
+        
+        if device == "mps" and precision == "bf16":
+            raise ValueError("BF16 precision not supported on MPS. Use fp16 or fp32 instead.")
+        
+        if device == "cuda":
+            if precision == "bf16" and not torch.cuda.is_bf16_supported():
+                raise ValueError("BF16 precision requested but not supported on this CUDA device")
+        
+        return precision
 
 class RunConfig(BaseModel):
     experiment_name: str
