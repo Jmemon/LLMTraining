@@ -121,7 +121,9 @@ def main():
     # Load configuration from YAML using pydantic.
     with open("configs/20M_test_model.yml", "r") as f:
         cfg = Config.model_validate(yaml.safe_load(f))
-
+    
+    from vorox.evaluators.builder import EvaluatorBuilder
+    
     load_dotenv()
     
     # Add this test
@@ -208,6 +210,9 @@ def main():
 
     # Validation loader can also be set up similarly.
     val_loader = None  # Replace with a similar pipeline if validation data exists.
+    
+    # Build evaluators
+    evaluators = EvaluatorBuilder.build(cfg.eval, cfg.eval.evaluators)
     
     # Start training.
     fit(cfg, model, train_loader, val_loader, optimizer, loss_fn)
