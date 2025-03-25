@@ -91,7 +91,7 @@ class LoggingConfig(BaseModel):
 class CheckpointConfig(BaseModel):
     save_top_k: int = 3
     checkpoint_dir: str
-    monitor: List[EvaluatorType] = []
+    monitor: Optional[EvaluatorType] = None
     mode: Literal["min", "max"] = "max"
     save_last: bool = True
     save_every_n_steps: int = 200
