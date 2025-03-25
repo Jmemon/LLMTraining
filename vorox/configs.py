@@ -98,10 +98,10 @@ class LoggingConfig(BaseModel):
 class CheckpointConfig(BaseModel):
     save_top_k: int = 3
     checkpoint_dir: str
-    monitor: str = "val/loss"
+    monitor: Optional[str] = None
     mode: Literal["min", "max"] = "min"
     save_last: bool = True
-    save_every_n_steps: int = 1000
+    save_every_n_steps: int = 200
     load_from_checkpoint: Optional[str] = None
 
 class HardwareConfig(BaseModel):
