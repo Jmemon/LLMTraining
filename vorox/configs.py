@@ -82,11 +82,6 @@ class DataConfig(BaseModel):
 class MetricsConfig(BaseModel):
     compute_metrics: bool
     train_metrics: List[Literal["loss"]]
-    val_metrics: List[Literal["loss"]]
-    val_check_interval: float = 1.0
-    early_stopping: bool
-    early_stopping_patience: int
-    early_stopping_min_delta: float
 
 class LoggingConfig(BaseModel):
     wandb_project: str
