@@ -53,9 +53,9 @@ class TrainConfig(BaseModel):
 
 class DatasetType(str, Enum):
     dclm_baseline = "dclm_baseline"
-    thestack = "thestack"
-    dolma = "dolma"
-    redpajama = "redpajama"
+    # thestack = "thestack"
+    # dolma = "dolma"
+    # redpajama = "redpajama"
 
 class EvaluatorType(str, Enum):
     mmlu = "mmlu"
