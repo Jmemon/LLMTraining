@@ -9,9 +9,13 @@ import zstandard as zstd
 import json
 import tarfile
 import io
+from datasets import load_dataset
 
 DCLM_PREFIX = "dclm-baseline"
 DCLM_BASELINE_REPO_ID = "mlfoundations/dclm-baseline-1.0"
+
+def dclm_baseline():
+    return load_dataset(DCLM_BASELINE_REPO_ID, split='train', streaming=True)
 
 
 def get_dclm_baseline_urls(bucket: str, prefix: str = DCLM_PREFIX) -> list[str]:
