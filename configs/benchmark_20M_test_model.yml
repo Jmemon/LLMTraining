@@ -1,0 +1,21 @@
+# Benchmark configuration for the 20M test model
+# This config is used to evaluate the model on all supported benchmarks
+
+checkpoint_dir: "./checkpoints"  # Directory containing model checkpoints
+
+# List of evaluators to run
+evaluators:
+  - mmlu
+  - gsm8k
+  - gsm_symbolic
+
+# W&B logging configuration
+wandb_project: "vorox_benchmarks"
+wandb_entity: null  # Use default entity
+wandb_tags:
+  - "benchmark"
+  - "20M_test"
+  - "evaluation"
+
+# Device to run evaluation on (uses checkpoint config if not specified)
+device: "cuda"  # Options: "cpu", "cuda", "mps"
