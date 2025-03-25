@@ -61,7 +61,6 @@ class EvaluatorType(str, Enum):
     mmlu = "mmlu"
     gsm8k = "gsm8k"
     gsm_symbolic = "gsm_symbolic"
-    arc_agi = "arc_agi"
 
 class EvaluatorConfig(BaseModel):
     evaluators: List[EvaluatorType]
