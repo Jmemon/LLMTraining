@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from vorox.configs import Config
+from vorox.configs import RunConfig as Config
 
 
 def fit(

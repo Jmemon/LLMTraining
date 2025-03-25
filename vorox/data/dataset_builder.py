@@ -1,6 +1,6 @@
 from typing import List
 from datasets import IterableDataset
-from vorox.configs import Config, DatasetType
+from vorox.configs import RunConfig as Config, DatasetType
 from vorox.data.dclm_baseline import dclm_baseline
 
 class DatasetBuilder:

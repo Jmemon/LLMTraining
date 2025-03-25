@@ -1,7 +1,7 @@
 
 import torch.optim as optim
 
-from vorox.config import OptimizerType
+from vorox.configs import OptimizerType
 
 
 class OptimizerBase:
@@ -60,6 +60,7 @@ class OptimizerBase:
 
     @classmethod
     def build(cls, model, cfg):
+        """
         """
         Factory method that instantiates optimizer instances based on configuration parameters.
         
