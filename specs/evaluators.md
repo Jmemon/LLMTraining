@@ -18,7 +18,9 @@ That are easy to instantiate and run on a model.
 ## Implementation Notes
 Use the HuggingFace `datasets` library to load and process the datasets.
 Stream all datasets, do not download them locally. 
-Create a few-shot prompt template for each evaluator based on the structure of the dataset rows. Applied to every row using dataset.map.
+Create a few-shot prompt template for each evaluator based on the structure of the dataset rows. 
+Applied to every row using dataset.map.
+LEAVE NOTHING UNIMPLEMENTED.
 
 ## Context
 ### Beginning Context
@@ -68,7 +70,8 @@ CREATE vorox/evaluators/mmlu_evaluator.py:
             self.performance_breakdown = {} # first level maps subject to {num_correct: int, num_total: int}
             self.dataset = load_dataset(self.repo_id, subset="all", split="test")
             # rows have structure: {question: str, subject: str, choices: List[str], answer: int} (answer is index of correct choice)
-            Include a processing step that applies a prompt to each row to get a prompt and expected response. Use a few-shot prompt.
+            Include a processing step using dataset.map that applies a prompt to each row to get a prompt and expected response. Use a few-shot prompt.
+            CREATE THIS PROMPT AND USE IT IN THE MAP. The shots should be the first 3 rows of the dataset.
             self.dataloader = DataLoader(self.dataset, batch_size=config.batch_size, shuffle=False, prefetch_size=config.prefetch_size, num_workers=config.num_workers)
 
         CREATE def __call__(self, model: nn.Module) -> Dict[str, Dict[str, int]]:
@@ -87,7 +90,8 @@ CREATE vorox/evaluators/gsm8k_evaluator.py:
         MIRROR MMLUEvaluator
         repo_id = "openai/gsm8k"
         each row has structure: {question: str, answer: str}  answer is expected response where last line is "#### <answer>"
-        Include a processing step that applies a prompt to each row to get a prompt and expected response.
+        Include a processing step using dataset.map that applies a prompt to each row to get a prompt and expected response.
+        CREATE THIS PROMPT AND USE IT IN THE MAP. The shots should be the first 3 rows of the dataset.
         subset="main", split="test"
         Use "all" as the only subject in performance_breakdown.
 
@@ -99,6 +103,7 @@ CREATE vorox/evaluators/gsmsymbolic_evaluator.py:
         MIRROR MMLUEvaluator
         repo_id = "apple/GSM-Symbolic"
         each row has two relevant fields: {question: str, answer: str}  answer is expected response where last line is "#### <answer>"
+        CREATE THIS PROMPT AND USE IT IN THE MAP. The shots should be the first 3 rows of the dataset.
         Include a processing step that applies a prompt to each row to get a prompt and expected response. Use the following template:
         ```
         As an expert problem solver, solve step by step the following mathematical questions.
@@ -107,8 +112,8 @@ CREATE vorox/evaluators/gsmsymbolic_evaluator.py:
         .
         .
         .
-        Q: <SHOT_8_QUESTION>
-        A: Let's think step by step. <SHOT_8_ANSWER>. The final answer is <SHOT_8_FINAL_ANSWER>.
+        Q: <SHOT_3_QUESTION>
+        A: Let's think step by step. <SHOT_3_ANSWER>. The final answer is <SHOT_3_FINAL_ANSWER>.
 
         Q: <TARGET_QUESTION>
         A: Let's think step by step.
