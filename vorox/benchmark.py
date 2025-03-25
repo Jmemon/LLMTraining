@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any, Union
 import time
 import json
 
+from pydantic import BaseModel, Field
 from vorox.configs import RunConfig, EvaluatorType
 from vorox.evaluators.builder import EvaluatorBuilder
 from vorox.vorox import Vorox
@@ -19,7 +20,39 @@ from transformers import AutoTokenizer
 
 logger = logging.getLogger(__name__)
 
-def benchmark(checkpoint_dir: Path, evaluators: Optional[List[EvaluatorType]] = None) -> Dict:
+class BenchmarkConfig(BaseModel):
+    """
+    Configuration for benchmarking Vorox models.
+    
+    This class defines all parameters needed for benchmarking a model,
+    including checkpoint directory, evaluators, and W&B logging settings.
+    """
+    checkpoint_dir: Path = Field(
+        ..., 
+        description="Directory containing model checkpoints"
+    )
+    evaluators: Optional[List[EvaluatorType]] = Field(
+        None, 
+        description="List of evaluators to run (if None, uses defaults or config from checkpoint)"
+    )
+    wandb_project: Optional[str] = Field(
+        None, 
+        description="W&B project name (overrides checkpoint config if provided)"
+    )
+    wandb_entity: Optional[str] = Field(
+        None, 
+        description="W&B entity (username/team) for logging"
+    )
+    wandb_tags: Optional[List[str]] = Field(
+        None, 
+        description="Tags to apply to the W&B run"
+    )
+    device: Optional[str] = Field(
+        None, 
+        description="Device to run evaluation on (overrides checkpoint config if provided)"
+    )
+
+def benchmark(config: BenchmarkConfig) -> Dict:
     """
     Benchmarks a trained Vorox model against specified evaluators.
     
@@ -43,6 +76,7 @@ def benchmark(checkpoint_dir: Path, evaluators: Optional[List[EvaluatorType]] = 
         ValueError: If no valid checkpoints are found
     """
     # Validate checkpoint directory
+    checkpoint_dir = config.checkpoint_dir
     if not checkpoint_dir.exists() or not checkpoint_dir.is_dir():
         raise FileNotFoundError(f"Checkpoint directory not found: {checkpoint_dir}")
     
@@ -81,8 +115,9 @@ def benchmark(checkpoint_dir: Path, evaluators: Optional[List[EvaluatorType]] = 
         # Assume it's already a RunConfig or similar
         cfg = checkpoint['config']
     
-    # Determine device
-    device = torch.device(cfg.hardware.device)
+    # Determine device (override from config if provided)
+    device_name = config.device or cfg.hardware.device
+    device = torch.device(device_name)
     logger.info(f"Using device: {device}")
     
     # Initialize tokenizer
@@ -99,6 +134,7 @@ def benchmark(checkpoint_dir: Path, evaluators: Optional[List[EvaluatorType]] = 
     logger.info(f"Model loaded successfully with {sum(p.numel() for p in model.parameters())} parameters")
     
     # Determine which evaluators to use
+    evaluators = config.evaluators
     if evaluators is None and hasattr(cfg, 'eval'):
         evaluators = cfg.eval.evaluators
     elif evaluators is None:
@@ -107,10 +143,15 @@ def benchmark(checkpoint_dir: Path, evaluators: Optional[List[EvaluatorType]] = 
         logger.info(f"No evaluators specified, using defaults: {[e.value for e in evaluators]}")
     
     # Initialize W&B if enabled
-    if hasattr(cfg, 'logging') and cfg.logging.wandb_project:
-        project = cfg.logging.wandb_project
-        entity = cfg.logging.wandb_entity if hasattr(cfg.logging, 'wandb_entity') else None
-        tags = cfg.logging.wandb_tags if hasattr(cfg.logging, 'wandb_tags') else []
+    if config.wandb_project or (hasattr(cfg, 'logging') and cfg.logging.wandb_project):
+        project = config.wandb_project or cfg.logging.wandb_project
+        entity = config.wandb_entity
+        if entity is None and hasattr(cfg, 'logging') and hasattr(cfg.logging, 'wandb_entity'):
+            entity = cfg.logging.wandb_entity
+        
+        tags = config.wandb_tags or []
+        if not tags and hasattr(cfg, 'logging') and hasattr(cfg.logging, 'wandb_tags'):
+            tags = cfg.logging.wandb_tags
         
         # Add benchmark tag
         if 'benchmark' not in tags:
@@ -229,6 +270,22 @@ if __name__ == "__main__":
         choices=[e.value for e in EvaluatorType],
         help="Evaluators to run (default: all)"
     )
+    parser.add_argument(
+        "--wandb_project",
+        type=str,
+        help="W&B project name (overrides checkpoint config)"
+    )
+    parser.add_argument(
+        "--wandb_entity",
+        type=str,
+        help="W&B entity (username/team) for logging"
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        choices=["cpu", "cuda", "mps"],
+        help="Device to run evaluation on (overrides checkpoint config)"
+    )
     
     args = parser.parse_args()
     
@@ -237,10 +294,16 @@ if __name__ == "__main__":
     if args.evaluators:
         eval_types = [EvaluatorType(e) for e in args.evaluators]
     
-    # Run benchmark
-    results = benchmark(
+    # Create benchmark config
+    config = BenchmarkConfig(
         checkpoint_dir=Path(args.checkpoint_dir),
-        evaluators=eval_types
+        evaluators=eval_types,
+        wandb_project=args.wandb_project,
+        wandb_entity=args.wandb_entity,
+        device=args.device
     )
+    
+    # Run benchmark
+    results = benchmark(config)
     
     logger.info(f"Benchmark complete. Overall results: {results.get('overall', {})}")
