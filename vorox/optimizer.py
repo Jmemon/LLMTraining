@@ -61,7 +61,6 @@ class OptimizerBase:
     @classmethod
     def build(cls, model, cfg):
         """
-        """
         Factory method that instantiates optimizer instances based on configuration parameters.
         
         Creates and returns the appropriate PyTorch optimizer implementation based on the
