@@ -29,7 +29,7 @@ import boto3
 import requests
 from urllib.parse import urlparse
 
-from vorox.config import Config
+from vorox.configs import Config
 from vorox.loss import LossBase
 from vorox.optimizer import OptimizerBase
 from vorox.train import fit

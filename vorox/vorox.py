@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoTokenizer
 
-from vorox.config import Config
+from vorox.configs import Config
 from vorox.utils import get_available_devices
 
 

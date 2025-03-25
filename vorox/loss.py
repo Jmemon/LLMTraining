@@ -1,7 +1,7 @@
 
 import torch.nn as nn
 
-from vorox.config import LossType
+from vorox.configs import LossType
 
 
 class LossBase:
