@@ -51,7 +51,7 @@ class Loss(BaseModel):
 class Train(BaseModel):
     epochs: int
 
-class Dataset(str, Enum):
+class DatasetType(str, Enum):
     dclm_baseline = "dclm_baseline"
     thestack = "thestack"
     dolma = "dolma"
@@ -70,7 +70,7 @@ class Data(BaseModel):
     macro_batch_size: int
     micro_batch_size: int
     max_seq_len: int
-    train_data: Union[List[Path], None] = None
+    train_data: Union[List[DatasetType], None] = None
     evaluators: Union[List[EvaluatorType], None] = ["mmlu"]
     # Additional settings (e.g. timeouts) can be added here
 
