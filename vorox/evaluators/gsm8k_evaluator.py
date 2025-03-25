@@ -1,3 +1,4 @@
+import re
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -52,7 +53,6 @@ class GSM8KEvaluator(EvaluatorBase):
                 
                 # Extract the final answer from model output
                 # Look for the pattern "#### <number>" at the end
-                import re
                 predicted_answer = None
                 match = re.search(r"####\s*([\d\.\-+]+)", model_output)
                 if match:
