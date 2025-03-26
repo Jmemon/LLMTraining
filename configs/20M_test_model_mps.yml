@@ -1,0 +1,70 @@
+experiment_name: "vorox_20M_test"
+seed: 42
+
+model:
+  tokenizer_name: "google-bert/bert-base-uncased"
+  n_layers: 4
+  d_model: 256
+  n_heads: 8
+  n_kv_heads: 4
+  hidden_size: 1024
+  activation: swiglu
+  rope: true
+  rope_theta: 10000
+
+optimizer:
+  type: adamw
+  lr: 1e-5
+  betas: [0.9, 0.999]
+  weight_decay: 0.01
+  gradient_clip_val: 1.0
+  warmup_steps: 100
+  scheduler: "cosine"
+
+loss:
+  name: perplexity
+
+train:
+  epochs: 10
+
+data:
+  prefetch_size: 10000
+  shuffle_buffer: false
+  num_workers: 4
+  macro_batch_size: 1024
+  micro_batch_size: 64
+  max_seq_len: 512
+  train_data: [dclm_baseline]
+
+hardware:
+  device: mps
+  precision: fp16
+  distributed: false
+  num_gpus: 1
+
+metrics:
+  compute_metrics: true
+  train_metrics: ["loss"]
+  early_stopping: true
+  early_stopping_patience: 3
+
+logging:
+  wandb_project: "vorox"
+  wandb_entity: null
+  wandb_tags: ["test", "20M"]
+  log_every_n_steps: 50
+
+checkpoint:
+  save_top_k: 3
+  checkpoint_dir: "./checkpoints"
+  monitor: mmlu
+  mode: max
+  save_last: true
+  save_every_n_steps: 1000
+
+eval:
+  evaluators: [mmlu, gsm8k]
+  batch_size: 16
+  num_workers: 2
+  prefetch_size: 4
+  val_check_interval: 1000
