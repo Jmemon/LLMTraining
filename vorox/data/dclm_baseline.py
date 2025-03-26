@@ -14,7 +14,6 @@ class DCLMBaselineDataset(IterableDataset):
     """
     def __init__(self):
         self.dataset = load_dataset(DCLM_BASELINE_REPO_ID, split='train', streaming=True)
-        self.dataset = self.dataset.with_format("torch")
         
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
