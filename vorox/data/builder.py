@@ -38,15 +38,15 @@ class DatasetBuilder:
         for dataset_type in config.data.train_data:
             if dataset_type == DatasetType.dclm_baseline:
                 datasets.append(dclm_baseline())
-            elif dataset_type == DatasetType.thestack:
-                # TODO: Implement thestack dataset
-                pass
-            elif dataset_type == DatasetType.dolma:
-                # TODO: Implement dolma dataset
-                pass
-            elif dataset_type == DatasetType.redpajama:
-                # TODO: Implement redpajama dataset
-                pass
+            # elif dataset_type == DatasetType.thestack:
+            #     # TODO: Implement thestack dataset
+            #     pass
+            # elif dataset_type == DatasetType.dolma:
+            #     # TODO: Implement dolma dataset
+            #     pass
+            # elif dataset_type == DatasetType.redpajama:
+            #     # TODO: Implement redpajama dataset
+            #     pass
             else:
                 raise ValueError(f"Unknown dataset type: {dataset_type}")
                 
