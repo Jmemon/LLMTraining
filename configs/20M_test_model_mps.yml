@@ -1,7 +1,7 @@
 experiment_name: "vorox_20M_test"
 seed: 42
 
-model:
+architecture:
   tokenizer_name: "google-bert/bert-base-uncased"
   n_layers: 4
   d_model: 256
