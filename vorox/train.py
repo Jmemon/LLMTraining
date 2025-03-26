@@ -95,8 +95,8 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
     
     # Initialize tokenizer
     from transformers import AutoTokenizer
-    tokenizer = AutoTokenizer.from_pretrained(cfg.model.tokenizer_name)
-    logger.info(f"Initialized tokenizer: {cfg.model.tokenizer_name}")
+    tokenizer = AutoTokenizer.from_pretrained(cfg.architecture.tokenizer_name)
+    logger.info(f"Initialized tokenizer: {cfg.architecture.tokenizer_name}")
     
     # Initialize model
     model = Vorox(cfg, tokenizer.vocab_size).to(device)
