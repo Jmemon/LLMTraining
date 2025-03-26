@@ -673,7 +673,7 @@ class GroupedQueryAttention(nn.Module):
         self.attn_proj = nn.Linear(self.d_model, sum(self.fused_dims), bias=False)  # fused linear layer to improve performance
         self.out_proj = nn.Linear(self.n_heads * self.d_v, self.d_model)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, causal_attn_mask: bool = False) -> torch.Tensor:
         """
         Applies grouped query attention to the input tensor with parameter-efficient key-value sharing.
         
@@ -689,10 +689,13 @@ class GroupedQueryAttention(nn.Module):
             - Space complexity: O(batch·seq_len²·n_heads) for attention matrix
             - Parallel computation across batch and head dimensions
             - Optional rotary position embeddings applied to query and key projections
+            - Optional causal masking to prevent attention to future tokens
             
         Args:
             x (torch.Tensor): Input tensor of shape [batch_size, seq_len, d_model]
                 containing token representations to compute attention over.
+            causal_attn_mask (bool, optional): Whether to apply causal masking to prevent
+                attention to future tokens. Defaults to False.
                 
         Returns:
             torch.Tensor: Output tensor of shape [batch_size, seq_len, d_model]
@@ -706,6 +709,7 @@ class GroupedQueryAttention(nn.Module):
             - Maintains precision by using appropriate scaling factors (1/√d_k)
             - Numerically stable through softmax normalization
             - Differentiable end-to-end with well-defined gradients
+            - When causal_attn_mask=True, prevents information leakage from future tokens
             
         Integration:
             - Core computation block within VoroxDecoderBlock
@@ -714,14 +718,12 @@ class GroupedQueryAttention(nn.Module):
             - Example:
               ```
               normalized_x = self.norm(x)
-              attention_output = self.attention(normalized_x)
+              attention_output = self.attention(normalized_x, causal_attn_mask=model.causal_attn_mask)
               x = x + attention_output  # Residual connection
               ```
               
         Limitations:
             - Quadratic memory scaling with sequence length (O(seq_len²))
-            - No explicit support for causal/masked attention
-            - No support for sparse attention patterns
             - Fixed attention pattern (no dynamic routing)
             - No explicit handling of padding tokens
             - Requires n_heads to be divisible by n_kv_heads
@@ -744,6 +746,14 @@ class GroupedQueryAttention(nn.Module):
         v = v.repeat_interleave(self.group_size, dim=1, output_size=self.n_heads)  # shape (B, n_heads, L, d_v)
 
         attn = (q @ k.transpose(-2, -1)) / (self.d_k ** 0.5)  # shape (B, n_heads, L, L)
+        
+        # Apply causal mask if requested
+        if causal_attn_mask:
+            # Create causal mask (upper triangular part of the attention matrix)
+            mask = torch.triu(torch.ones(L, L, device=x.device), diagonal=1).bool()
+            # Set masked positions to -inf before softmax
+            attn.masked_fill_(mask, float('-inf'))
+            
         attn = attn.softmax(dim=-1) @ v  # shape (B, n_heads, L, d_v)
         attn = attn.transpose(1, 2).reshape(B, L, self.n_heads * self.d_v)  # shape (B, L, n_heads * d_v)
 
@@ -757,7 +767,7 @@ class VoroxDecoderBlock(nn.Module):
         ``(MLP∘LN-simple)((Attn∘LN-simple)(x) + x) + interm_x``
     """
 
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, causal_attn_mask: bool = False):
         """
         Initializes a decoder-only transformer block with pre-normalization architecture.
         
@@ -774,6 +784,7 @@ class VoroxDecoderBlock(nn.Module):
             - Space complexity: O(d_model²) for parameters, O(batch·seq_len·d_model) for activations
             - Parameter sharing in attention through grouped query-key-value projections
             - Non-parametric layer normalization (elementwise_affine=False) for stability
+            - Optional causal masking to prevent attention to future tokens
         
         Args:
             cfg (Config): Configuration object containing architecture parameters including:
@@ -781,6 +792,8 @@ class VoroxDecoderBlock(nn.Module):
                 - n_heads (int): Number of attention heads (must be divisible by 4)
                 - hidden_size (int): Dimension of the MLP's hidden layer
                 - activation (str): Activation function type for the MLP
+            causal_attn_mask (bool, optional): Whether to apply causal masking to prevent
+                attention to future tokens. Defaults to False.
                 
         Raises:
             AssertionError: When cfg.architecture.n_heads is not divisible by 4,
@@ -793,6 +806,7 @@ class VoroxDecoderBlock(nn.Module):
             - Differentiable end-to-end with well-defined gradients
             - Preserves input tensor's batch and sequence dimensions
             - Initialization follows PyTorch defaults for linear layers
+            - When causal_attn_mask=True, prevents information leakage from future tokens
         
         Integration:
             - Core building block within Vorox transformer model
@@ -806,7 +820,6 @@ class VoroxDecoderBlock(nn.Module):
         
         Limitations:
             - Attention complexity scales quadratically with sequence length
-            - No support for causal masking (assumes full attention)
             - Fixed n_kv_heads ratio (n_heads/4) with no configuration option
             - No support for cross-attention (decoder-only architecture)
             - No explicit handling of padding tokens
@@ -820,6 +833,7 @@ class VoroxDecoderBlock(nn.Module):
         self.n_heads = cfg.architecture.n_heads
         self.n_kv_heads = cfg.architecture.n_heads // 4
         self.hidden_size = cfg.architecture.hidden_size
+        self.causal_attn_mask = causal_attn_mask
 
         self.attn_norm = LayerNorm((self.d_model,), elementwise_affine=False)
         self.attn = GroupedQueryAttention(cfg)
@@ -831,7 +845,7 @@ class VoroxDecoderBlock(nn.Module):
         )
 
     def forward(self, x):
-        interm_x = x + self.attn(self.attn_norm(x))
+        interm_x = x + self.attn(self.attn_norm(x), causal_attn_mask=self.causal_attn_mask)
         out_x = interm_x + self.mlp(self.mlp_norm(interm_x))
         return out_x
 
@@ -917,7 +931,6 @@ class Vorox(nn.Module):
         
         Limitations:
             - Attention complexity scales quadratically with sequence length (O(seq_len²))
-            - No explicit causal masking in the architecture (must be handled externally)
             - No key-value caching implementation for efficient autoregressive generation
             - No explicit position embeddings beyond optional RoPE in attention
             - Fixed vocabulary size defined at initialization (no dynamic vocabulary)
@@ -935,11 +948,33 @@ class Vorox(nn.Module):
         self.d_model = cfg.architecture.d_model
         self.n_heads = cfg.architecture.n_heads
         self.vocab_size = vocab_size
+        
+        # Set causal attention mask based on whether we're in training or eval mode
+        # Default to False for eval-only configs, True if train config exists
+        self.causal_attn_mask = hasattr(cfg, 'train')
 
         self.emb = nn.Embedding(vocab_size, self.d_model)
-        self.transformer_blocks = nn.Sequential(*[VoroxDecoderBlock(cfg) for _ in range(cfg.architecture.n_layers)])
+        self.transformer_blocks = nn.Sequential(*[VoroxDecoderBlock(cfg, causal_attn_mask=self.causal_attn_mask) for _ in range(cfg.architecture.n_layers)])
         self.ff_out = nn.Linear(self.d_model, vocab_size)
 
+    def train(self) -> None:
+        """
+        Sets the model to training mode and enables causal attention masking.
+        
+        Extends the standard PyTorch train() method to also enable causal attention masking,
+        ensuring that during training the model properly masks future tokens in the attention
+        mechanism to prevent information leakage.
+        
+        Returns:
+            None
+        """
+        super().train()
+        self.causal_attn_mask = True
+        
+        # Update causal_attn_mask in all decoder blocks
+        for block in self.transformer_blocks:
+            block.causal_attn_mask = True
+        
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         """
         Executes the forward pass of the Vorox transformer model, converting token IDs to next-token logits.
@@ -958,7 +993,7 @@ class Vorox(nn.Module):
             - Grouped query attention with n_heads query projections sharing n_kv_heads key-value pairs
             - Memory complexity: O(batch·seq_len·d_model·n_layers) for activations during forward pass
             - Computation graph optimized for autoregressive next-token prediction
-            - No explicit causal masking in implementation (assumes left-to-right attention pattern)
+            - Optional causal masking in attention to prevent information leakage from future tokens
             - Parameter efficiency through key-value head sharing (n_heads > n_kv_heads)
             
         Args:
@@ -984,6 +1019,7 @@ class Vorox(nn.Module):
             - Preserves sequence ordering through optional rotary position embeddings in attention
             - Memory usage scales linearly with batch size and sequence length
             - Computation time dominated by attention operations (quadratic with sequence length)
+            - When self.causal_attn_mask=True, prevents attention to future tokens
             
         Integration:
             - Primary entry point for both training and inference workflows
@@ -1002,7 +1038,6 @@ class Vorox(nn.Module):
               
         Limitations:
             - Quadratic scaling with sequence length limits practical context window size
-            - No explicit causal masking (assumes left-to-right attention pattern)
             - No key-value caching implementation for efficient autoregressive generation
             - No support for bidirectional attention patterns (decoder-only architecture)
             - No handling of position IDs or attention masks as explicit inputs
