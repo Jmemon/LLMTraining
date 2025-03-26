@@ -45,7 +45,7 @@ class LossType(str, Enum):
     perplexity = "perplexity"
 
 class LossConfig(BaseModel):
-    name: LossType
+    type: LossType
 
 class TrainConfig(BaseModel):
     epochs: int
