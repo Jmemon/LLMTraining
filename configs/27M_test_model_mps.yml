@@ -22,7 +22,7 @@ optimizer:
   scheduler: "cosine"
 
 loss:
-  name: perplexity
+  type: perplexity
 
 train:
   epochs: 10
