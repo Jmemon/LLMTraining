@@ -123,7 +123,7 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
     
     # Initialize loss function
     criterion = LossBase.build(cfg)
-    logger.info(f"Initialized loss function: {cfg.loss.name}")
+    logger.info(f"Initialized loss function: {cfg.loss.type}")
     
     # Initialize scheduler if specified
     scheduler = None
