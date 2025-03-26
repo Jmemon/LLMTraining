@@ -28,12 +28,22 @@ class DCLMBaselineDataset(IterableDataset):
             # Skip samples that aren't for this worker
             dataset_iter = iter(self.dataset)
             for i, sample in enumerate(dataset_iter):
-                if i % num_workers == worker_id:
-                    yield {"text": sample["text"]}
+                try:
+                    if i % num_workers == worker_id:
+                        yield {"text": sample["text"]}
+                except Exception as e:
+                    print(f"Error processing sample: {sample}")
+                    print(f"Exception: {e}")
+                    raise
         else:
             # Single worker case - process all samples
             for sample in self.dataset:
-                yield {"text": sample["text"]}
+                try:
+                    yield {"text": sample["text"]}
+                except Exception as e:
+                    print(f"Error processing sample: {sample}")
+                    print(f"Exception: {e}")
+                    raise
 
 def dclm_baseline():
     """
