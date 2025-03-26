@@ -14,7 +14,7 @@ class ActivationType(str, Enum):
     silu = "silu"
     swiglu = "swiglu"
 
-class ModelConfig(BaseModel):
+class ArchitectureConfig(BaseModel):
     tokenizer_name: str
     n_layers: int
     d_model: int
@@ -131,7 +131,7 @@ class HardwareConfig(BaseModel):
 class RunConfig(BaseModel):
     experiment_name: str
     seed: int
-    model: ModelConfig
+    architecture: ArchitectureConfig
     optimizer: OptimizerConfig
     loss: LossConfig
     train: TrainConfig
