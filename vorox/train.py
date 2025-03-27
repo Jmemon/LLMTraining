@@ -214,7 +214,7 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
                     outputs = model(
                         tokenized_inputs.input_ids,
                         causal_attn_mask=True,
-                        apply_softmax_layer=True
+                        apply_softmax=True
                     )
                     
                     # Calculate loss using the criterion
@@ -240,7 +240,7 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
                 outputs = model(
                     tokenized_inputs.input_ids,
                     causal_attn_mask=True,
-                    apply_softmax_layer=True
+                    apply_softmax=True
                 )
                 
                 # Calculate loss using the criterion
