@@ -161,6 +161,7 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
     best_ckpt_path = None
     early_stop_counter = 0
     global_step = 0
+    total_tokens_processed = 0  # Track tokens across all epochs
     
     # Build evaluators if specified
     evaluators = EvaluatorBuilder.build(cfg.eval, cfg.eval.evaluators) if hasattr(cfg, 'eval') else []
@@ -191,10 +192,10 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
         # Progress bar for training showing token progress
         train_iterator = tqdm(
             total=cfg.data.epoch_tokens,
-            desc=f"Epoch {epoch+1}/{cfg.data.epochs}",
+            desc=f"Epoch {epoch+1}/{cfg.data.epochs} (Total: {total_tokens_processed})",
             unit="tokens"
         )
-        tokens_processed = 0
+        epoch_tokens_processed = 0  # Reset for each epoch
         
         for batch_idx, batch in enumerate(train_loader):
             # Process batch - expecting dict with 'text' key containing list of strings
@@ -270,13 +271,14 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
             
             # Count tokens in this batch and update progress bar
             batch_tokens = tokenized_inputs.input_ids.numel()
-            tokens_processed += batch_tokens
+            epoch_tokens_processed += batch_tokens
+            total_tokens_processed += batch_tokens
             train_iterator.update(batch_tokens)
             train_iterator.set_postfix({"loss": loss.item()})
             
             # Check if we've processed enough tokens for this epoch
-            if tokens_processed >= cfg.data.epoch_tokens:
-                logger.info(f"Reached epoch token threshold ({tokens_processed}/{cfg.data.epoch_tokens}). Ending epoch.")
+            if epoch_tokens_processed >= cfg.data.epoch_tokens:
+                logger.info(f"Reached epoch token threshold ({epoch_tokens_processed}/{cfg.data.epoch_tokens}). Ending epoch.")
                 break
             
             # Calculate training metrics if enabled
@@ -388,13 +390,14 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
         # Calculate average epoch loss
         avg_epoch_loss = epoch_loss / num_batches
         epoch_time = time.time() - epoch_start_time
-        logger.info(f"Epoch {epoch+1} completed in {epoch_time:.2f}s, Avg Loss: {avg_epoch_loss:.6f}, Tokens: {tokens_processed}")
+        logger.info(f"Epoch {epoch+1} completed in {epoch_time:.2f}s, Avg Loss: {avg_epoch_loss:.6f}, Epoch Tokens: {epoch_tokens_processed}, Total Tokens: {total_tokens_processed}")
         
         if cfg.logging.wandb_project:
             wandb.log({
                 "train/epoch_loss": avg_epoch_loss, 
                 "epoch": epoch,
-                "tokens_processed": tokens_processed
+                "epoch_tokens_processed": epoch_tokens_processed,
+                "total_tokens_processed": total_tokens_processed
             })
         
         # Final evaluation at the end of each epoch
