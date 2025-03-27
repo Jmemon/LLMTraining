@@ -767,7 +767,7 @@ class VoroxDecoderBlock(nn.Module):
         ``(MLP∘LN-simple)((Attn∘LN-simple)(x) + x) + interm_x``
     """
 
-    def __init__(self, cfg: Config, causal_attn_mask: bool = False):
+    def __init__(self, cfg: Config):
         """
         Initializes a decoder-only transformer block with pre-normalization architecture.
         
@@ -792,8 +792,6 @@ class VoroxDecoderBlock(nn.Module):
                 - n_heads (int): Number of attention heads (must be divisible by 4)
                 - hidden_size (int): Dimension of the MLP's hidden layer
                 - activation (str): Activation function type for the MLP
-            causal_attn_mask (bool, optional): Whether to apply causal masking to prevent
-                attention to future tokens. Defaults to False.
                 
         Raises:
             AssertionError: When cfg.architecture.n_heads is not divisible by 4,
@@ -806,7 +804,6 @@ class VoroxDecoderBlock(nn.Module):
             - Differentiable end-to-end with well-defined gradients
             - Preserves input tensor's batch and sequence dimensions
             - Initialization follows PyTorch defaults for linear layers
-            - When causal_attn_mask=True, prevents information leakage from future tokens
         
         Integration:
             - Core building block within Vorox transformer model
@@ -833,7 +830,6 @@ class VoroxDecoderBlock(nn.Module):
         self.n_heads = cfg.architecture.n_heads
         self.n_kv_heads = cfg.architecture.n_heads // 4
         self.hidden_size = cfg.architecture.hidden_size
-        self.causal_attn_mask = causal_attn_mask
 
         self.attn_norm = LayerNorm((self.d_model,), elementwise_affine=False)
         self.attn = GroupedQueryAttention(cfg)
@@ -844,8 +840,8 @@ class VoroxDecoderBlock(nn.Module):
             nn.Linear(self.hidden_size, self.d_model),
         )
 
-    def forward(self, x):
-        interm_x = x + self.attn(self.attn_norm(x), causal_attn_mask=self.causal_attn_mask)
+    def forward(self, x, causal_attn_mask: bool = False):
+        interm_x = x + self.attn(self.attn_norm(x), causal_attn_mask=causal_attn_mask)
         out_x = interm_x + self.mlp(self.mlp_norm(interm_x))
         return out_x
 
@@ -948,34 +944,12 @@ class Vorox(nn.Module):
         self.d_model = cfg.architecture.d_model
         self.n_heads = cfg.architecture.n_heads
         self.vocab_size = vocab_size
-        
-        # Set causal attention mask based on whether we're in training or eval mode
-        # Default to False for eval-only configs, True if train config exists
-        self.causal_attn_mask = hasattr(cfg, 'train')
 
         self.emb = nn.Embedding(vocab_size, self.d_model)
-        self.transformer_blocks = nn.Sequential(*[VoroxDecoderBlock(cfg, causal_attn_mask=self.causal_attn_mask) for _ in range(cfg.architecture.n_layers)])
+        self.transformer_blocks = nn.Sequential(*[VoroxDecoderBlock(cfg) for _ in range(cfg.architecture.n_layers)])
         self.ff_out = nn.Linear(self.d_model, vocab_size)
 
-    def train(self) -> None:
-        """
-        Sets the model to training mode and enables causal attention masking.
-        
-        Extends the standard PyTorch train() method to also enable causal attention masking,
-        ensuring that during training the model properly masks future tokens in the attention
-        mechanism to prevent information leakage.
-        
-        Returns:
-            None
-        """
-        super().train()
-        self.causal_attn_mask = True
-        
-        # Update causal_attn_mask in all decoder blocks
-        for block in self.transformer_blocks:
-            block.causal_attn_mask = True
-        
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+    def forward(self, input_ids: torch.Tensor, causal_attn_mask: bool = False) -> torch.Tensor:
         """
         Executes the forward pass of the Vorox transformer model, converting token IDs to next-token logits.
         
@@ -1002,6 +976,9 @@ class Vorox(nn.Module):
                 Typically produced by a tokenizer from raw text.
                 No explicit handling of padding tokens or attention masks.
                 Supports variable sequence lengths up to model's context window.
+            
+            causal_attn_mask (bool, optional): Whether to apply causal masking to prevent
+                attention to future tokens. Defaults to False.
                 
         Returns:
             torch.Tensor: Logits tensor of shape [batch_size, seq_len, vocab_size] containing
@@ -1019,7 +996,7 @@ class Vorox(nn.Module):
             - Preserves sequence ordering through optional rotary position embeddings in attention
             - Memory usage scales linearly with batch size and sequence length
             - Computation time dominated by attention operations (quadratic with sequence length)
-            - When self.causal_attn_mask=True, prevents attention to future tokens
+            - When causal_attn_mask=True, prevents attention to future tokens
             
         Integration:
             - Primary entry point for both training and inference workflows
@@ -1030,7 +1007,7 @@ class Vorox(nn.Module):
             - Example (generation loop):
               ```python
               for i in range(max_length):
-                  logits = model(input_ids)
+                  logits = model(input_ids, causal_attn_mask=True)
                   next_token_logits = logits[:, -1, :]
                   next_token = torch.argmax(next_token_logits, dim=-1)
                   input_ids = torch.cat([input_ids, next_token.unsqueeze(-1)], dim=-1)
@@ -1046,7 +1023,7 @@ class Vorox(nn.Module):
             - No built-in support for efficient batched generation
         """
         x = self.emb(input_ids)
-        x = self.transformer_blocks(x)
+        x = self.transformer_blocks(x, causal_attn_mask=causal_attn_mask)
         x = self.ff_out(x)
         return x
     
