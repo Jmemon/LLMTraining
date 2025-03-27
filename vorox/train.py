@@ -200,7 +200,7 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
                 text_samples,
                 padding="max_length",
                 truncation=True,
-                max_length=cfg.train.max_seq_len,
+                max_length=cfg.data.max_seq_len,
                 return_tensors="pt"
             ).to(device)
             
