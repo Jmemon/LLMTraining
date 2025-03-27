@@ -14,6 +14,12 @@ class DCLMBaselineDataset(IterableDataset):
     """
     def __init__(self):
         self.dataset = load_dataset(DCLM_BASELINE_REPO_ID, split='train', streaming=True)
+    
+    def __len__(self):
+        """
+        Returns the number of items in the dataset.
+        """
+        return len(self.dataset)
         
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
