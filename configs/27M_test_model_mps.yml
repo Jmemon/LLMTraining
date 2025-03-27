@@ -25,7 +25,7 @@ loss:
   type: perplexity
 
 train:
-  epochs: 10
+  epochs: 1
 
 data:
   prefetch_size: 10000
@@ -64,7 +64,7 @@ checkpoint:
 
 eval:
   evaluators: [mmlu, gsm8k]
-  batch_size: 16
+  batch_size: 8
   num_workers: 2
   prefetch_size: 4
   val_check_interval: 1000
