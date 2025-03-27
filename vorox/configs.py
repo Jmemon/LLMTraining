@@ -47,8 +47,6 @@ class LossType(str, Enum):
 class LossConfig(BaseModel):
     type: LossType
 
-class TrainConfig(BaseModel):
-    epochs: int
 
 class DatasetType(str, Enum):
     dclm_baseline = "dclm_baseline"
@@ -74,6 +72,8 @@ class DataConfig(BaseModel):
     macro_batch_size: int
     micro_batch_size: int
     max_seq_len: int
+    epochs: int
+    epoch_tokens: int
     train_data: Union[List[DatasetType], None] = None
     # Additional settings (e.g. timeouts) can be added here
 
@@ -134,7 +134,6 @@ class RunConfig(BaseModel):
     architecture: ArchitectureConfig
     optimizer: OptimizerConfig
     loss: LossConfig
-    train: TrainConfig
     data: DataConfig
     hardware: HardwareConfig
     metrics: MetricsConfig

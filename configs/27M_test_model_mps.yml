@@ -24,10 +24,9 @@ optimizer:
 loss:
   type: perplexity
 
-train:
-  epochs: 1
-
 data:
+  epochs: 1
+  epoch_tokens: 100000
   prefetch_size: 10000
   shuffle_buffer: false
   num_workers: 4
