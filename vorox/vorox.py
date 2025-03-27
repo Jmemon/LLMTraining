@@ -1044,9 +1044,9 @@ class Vorox(nn.Module):
         self.transformer_blocks = nn.Sequential(*[VoroxDecoderBlock(cfg) for _ in range(cfg.architecture.n_layers)])
         self.ff_out = nn.Linear(self.d_model, vocab_size)
 
-    def forward(self, input_ids: torch.Tensor, causal_attn_mask: bool = False, debug_print: bool = False) -> torch.Tensor:
+    def forward(self, input_ids: torch.Tensor, causal_attn_mask: bool = False, debug_print: bool = False, apply_softmax: bool = False) -> torch.Tensor:
         """
-        Executes the forward pass of the Vorox transformer model, converting token IDs to next-token logits.
+        Executes the forward pass of the Vorox transformer model, converting token IDs to next-token logits or probabilities.
         
         Implements the core computational pipeline of a decoder-only transformer with grouped query attention,
         designed for autoregressive language modeling with parameter-efficient architecture. Processes input
@@ -1064,6 +1064,7 @@ class Vorox(nn.Module):
             - Computation graph optimized for autoregressive next-token prediction
             - Optional causal masking in attention to prevent information leakage from future tokens
             - Parameter efficiency through key-value head sharing (n_heads > n_kv_heads)
+            - Optional softmax layer to convert logits to probability distribution
             
         Args:
             input_ids (torch.Tensor): Integer tensor of shape [batch_size, seq_len] containing token indices.
@@ -1075,12 +1076,18 @@ class Vorox(nn.Module):
             causal_attn_mask (bool, optional): Whether to apply causal masking to prevent
                 attention to future tokens. Defaults to False.
                 
+            debug_print (bool, optional): Whether to print debug information during forward pass.
+                Defaults to False.
+                
+            apply_softmax (bool, optional): Whether to apply softmax to the output logits to
+                convert them to probability distributions. Defaults to False.
+                
         Returns:
-            torch.Tensor: Logits tensor of shape [batch_size, seq_len, vocab_size] containing
-                unnormalized prediction scores for next-token distribution at each position.
-                For autoregressive models, each position contains predictions conditioned
-                only on previous positions. Values represent raw scores before softmax
-                normalization for probability distribution.
+            torch.Tensor: Output tensor of shape [batch_size, seq_len, vocab_size] containing either:
+                - Unnormalized logits (when apply_softmax=False): Raw prediction scores for next-token
+                  distribution at each position.
+                - Probability distributions (when apply_softmax=True): Normalized probabilities after
+                  applying softmax, representing the model's predicted distribution over the vocabulary.
                 
         Behavior:
             - Deterministic computation with identical outputs for fixed weights and inputs
@@ -1092,19 +1099,20 @@ class Vorox(nn.Module):
             - Memory usage scales linearly with batch size and sequence length
             - Computation time dominated by attention operations (quadratic with sequence length)
             - When causal_attn_mask=True, prevents attention to future tokens
+            - When apply_softmax=True, returns normalized probability distributions
             
         Integration:
             - Primary entry point for both training and inference workflows
-            - In training: Followed by cross-entropy loss computation against target tokens
-            - In generation: Used with sampling strategies (greedy, top-k, top-p) for text completion
+            - In training: Typically used with apply_softmax=False, followed by cross-entropy loss
+            - In generation: Used with apply_softmax=True for sampling strategies (top-k, top-p)
             - Compatible with PyTorch's autograd system for gradient-based optimization
             - Designed for integration with HuggingFace's transformers ecosystem
             - Example (generation loop):
               ```python
               for i in range(max_length):
-                  logits = model(input_ids, causal_attn_mask=True)
-                  next_token_logits = logits[:, -1, :]
-                  next_token = torch.argmax(next_token_logits, dim=-1)
+                  probs = model(input_ids, causal_attn_mask=True, apply_softmax=True)
+                  next_token_probs = probs[:, -1, :]
+                  next_token = torch.multinomial(next_token_probs, num_samples=1).squeeze(-1)
                   input_ids = torch.cat([input_ids, next_token.unsqueeze(-1)], dim=-1)
               ```
               
@@ -1145,6 +1153,14 @@ class Vorox(nn.Module):
         
         ff_start = time.time()
         x = self.ff_out(x)
+        
+        # Apply softmax if requested
+        if apply_softmax:
+            softmax_start = time.time()
+            x = F.softmax(x, dim=-1)
+            if debug_print:
+                print(f"[Vorox] Softmax time: {time.time() - softmax_start:.4f}s")
+        
         if debug_print:
             print(f"[Vorox] Output projection time: {time.time() - ff_start:.4f}s")
             print(f"[Vorox] Final output shape: {x.shape}, Memory: {x.element_size() * x.nelement() / 1024 / 1024:.2f} MB")
