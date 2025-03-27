@@ -673,7 +673,7 @@ class GroupedQueryAttention(nn.Module):
         self.attn_proj = nn.Linear(self.d_model, sum(self.fused_dims), bias=False)  # fused linear layer to improve performance
         self.out_proj = nn.Linear(self.n_heads * self.d_v, self.d_model)
 
-    def forward(self, x: torch.Tensor, causal_attn_mask: bool = False) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, causal_attn_mask: bool = False, debug_print: bool = False) -> torch.Tensor:
         """
         Applies grouped query attention to the input tensor with parameter-efficient key-value sharing.
         
@@ -728,36 +728,90 @@ class GroupedQueryAttention(nn.Module):
             - No explicit handling of padding tokens
             - Requires n_heads to be divisible by n_kv_heads
         """
+        import time
+        start_time = time.time()
+        
         B, L, _ = x.size()
-
-        q, k, v = self.attn_proj(x).split(self.fused_dims, dim=-1)  # the output of the layer will be (B, L, sum(self.fused_dims))
+        if debug_print:
+            print(f"[GQA] Input shape: {x.shape}, Memory: {x.element_size() * x.nelement() / 1024 / 1024:.2f} MB")
+            
+        proj_start = time.time()
+        qkv = self.attn_proj(x)
+        if debug_print:
+            print(f"[GQA] QKV projection time: {time.time() - proj_start:.4f}s")
+            print(f"[GQA] QKV projection shape: {qkv.shape}, Memory: {qkv.element_size() * qkv.nelement() / 1024 / 1024:.2f} MB")
+            
+        q, k, v = qkv.split(self.fused_dims, dim=-1)  # the output of the layer will be (B, L, sum(self.fused_dims))
+        if debug_print:
+            print(f"[GQA] Split shapes - Q: {q.shape}, K: {k.shape}, V: {v.shape}")
 
         # torch matmul with @ for tensors with shapes (..., a, b) and (..., b, c) results in shape (..., a, c)
         # so we need to re-shape q, k, v so that we can do the matmul (ie with dimensions[:-2] being the same)
+        reshape_start = time.time()
         q = q.view(B, L, self.n_heads, self.d_k).transpose(1, 2)  # so last two dims are sequence x query
         k = k.view(B, L, self.n_kv_heads, self.d_k).transpose(1, 2)  # so last two dims are sequence x key
         v = v.view(B, L, self.n_kv_heads, self.d_v).transpose(1, 2)  # so last two dims are sequence x value
+        if debug_print:
+            print(f"[GQA] Reshape time: {time.time() - reshape_start:.4f}s")
+            print(f"[GQA] Reshaped Q: {q.shape}, K: {k.shape}, V: {v.shape}")
 
         if self.cfg.architecture.rope:
+            rope_start = time.time()
             q, k = self.rope(q, k)
+            if debug_print:
+                print(f"[GQA] RoPE application time: {time.time() - rope_start:.4f}s")
+                print(f"[GQA] After RoPE - Q: {q.shape}, K: {k.shape}")
 
         # to make shapes compatible for matmul, we need to repeat each group's key and value tensors group_size times
+        repeat_start = time.time()
         k = k.repeat_interleave(self.group_size, dim=1, output_size=self.n_heads)  # shape (B, n_heads, L, d_k)
         v = v.repeat_interleave(self.group_size, dim=1, output_size=self.n_heads)  # shape (B, n_heads, L, d_v)
+        if debug_print:
+            print(f"[GQA] Key-value repeat time: {time.time() - repeat_start:.4f}s")
+            print(f"[GQA] After repeat - K: {k.shape}, V: {v.shape}")
 
+        attn_start = time.time()
         attn = (q @ k.transpose(-2, -1)) / (self.d_k ** 0.5)  # shape (B, n_heads, L, L)
+        if debug_print:
+            print(f"[GQA] Attention scores computation time: {time.time() - attn_start:.4f}s")
+            print(f"[GQA] Attention scores shape: {attn.shape}, Memory: {attn.element_size() * attn.nelement() / 1024 / 1024:.2f} MB")
         
         # Apply causal mask if requested
         if causal_attn_mask:
+            mask_start = time.time()
             # Create causal mask (upper triangular part of the attention matrix)
             mask = torch.triu(torch.ones(L, L, device=x.device), diagonal=1).bool()
             # Set masked positions to -inf before softmax
             attn.masked_fill_(mask, float('-inf'))
+            if debug_print:
+                print(f"[GQA] Causal mask applied, mask creation time: {time.time() - mask_start:.4f}s")
+                print(f"[GQA] Mask shape: {mask.shape}")
+        elif debug_print:
+            print(f"[GQA] No causal mask applied")
             
-        attn = attn.softmax(dim=-1) @ v  # shape (B, n_heads, L, d_v)
+        softmax_start = time.time()
+        attn = attn.softmax(dim=-1)
+        if debug_print:
+            print(f"[GQA] Softmax time: {time.time() - softmax_start:.4f}s")
+            
+        attn_output_start = time.time()
+        attn = attn @ v  # shape (B, n_heads, L, d_v)
+        if debug_print:
+            print(f"[GQA] Attention output computation time: {time.time() - attn_output_start:.4f}s")
+            print(f"[GQA] Attention output shape: {attn.shape}")
+        reshape_start = time.time()
         attn = attn.transpose(1, 2).reshape(B, L, self.n_heads * self.d_v)  # shape (B, L, n_heads * d_v)
+        if debug_print:
+            print(f"[GQA] Reshape time: {time.time() - reshape_start:.4f}s")
+            print(f"[GQA] Reshaped attention: {attn.shape}")
 
+        proj_start = time.time()
         out = self.out_proj(attn)  # shape (B, L, d_model)
+        if debug_print:
+            print(f"[GQA] Output projection time: {time.time() - proj_start:.4f}s")
+            print(f"[GQA] Output shape: {out.shape}, Memory: {out.element_size() * out.nelement() / 1024 / 1024:.2f} MB")
+            print(f"[GQA] Total forward time: {time.time() - start_time:.4f}s")
+            
         return out
 
 
@@ -840,9 +894,50 @@ class VoroxDecoderBlock(nn.Module):
             nn.Linear(self.hidden_size, self.d_model),
         )
 
-    def forward(self, x, causal_attn_mask: bool = False):
-        interm_x = x + self.attn(self.attn_norm(x), causal_attn_mask=causal_attn_mask)
-        out_x = interm_x + self.mlp(self.mlp_norm(interm_x))
+    def forward(self, x, causal_attn_mask: bool = False, debug_print: bool = False):
+        import time
+        start_time = time.time()
+        
+        if debug_print:
+            print(f"[DecoderBlock] Input shape: {x.shape}, Memory: {x.element_size() * x.nelement() / 1024 / 1024:.2f} MB")
+        
+        norm_start = time.time()
+        norm_x = self.attn_norm(x)
+        if debug_print:
+            print(f"[DecoderBlock] Attention norm time: {time.time() - norm_start:.4f}s")
+            print(f"[DecoderBlock] Normalized shape: {norm_x.shape}")
+        
+        attn_start = time.time()
+        attn_out = self.attn(norm_x, causal_attn_mask=causal_attn_mask, debug_print=debug_print)
+        if debug_print:
+            print(f"[DecoderBlock] Attention time: {time.time() - attn_start:.4f}s")
+            print(f"[DecoderBlock] Attention output shape: {attn_out.shape}")
+        
+        residual_start = time.time()
+        interm_x = x + attn_out
+        if debug_print:
+            print(f"[DecoderBlock] First residual time: {time.time() - residual_start:.4f}s")
+            print(f"[DecoderBlock] After first residual shape: {interm_x.shape}")
+        
+        mlp_norm_start = time.time()
+        mlp_norm_x = self.mlp_norm(interm_x)
+        if debug_print:
+            print(f"[DecoderBlock] MLP norm time: {time.time() - mlp_norm_start:.4f}s")
+            print(f"[DecoderBlock] MLP normalized shape: {mlp_norm_x.shape}")
+        
+        mlp_start = time.time()
+        mlp_out = self.mlp(mlp_norm_x)
+        if debug_print:
+            print(f"[DecoderBlock] MLP time: {time.time() - mlp_start:.4f}s")
+            print(f"[DecoderBlock] MLP output shape: {mlp_out.shape}")
+        
+        final_residual_start = time.time()
+        out_x = interm_x + mlp_out
+        if debug_print:
+            print(f"[DecoderBlock] Second residual time: {time.time() - final_residual_start:.4f}s")
+            print(f"[DecoderBlock] Output shape: {out_x.shape}, Memory: {out_x.element_size() * out_x.nelement() / 1024 / 1024:.2f} MB")
+            print(f"[DecoderBlock] Total forward time: {time.time() - start_time:.4f}s")
+        
         return out_x
 
 
@@ -949,7 +1044,7 @@ class Vorox(nn.Module):
         self.transformer_blocks = nn.Sequential(*[VoroxDecoderBlock(cfg) for _ in range(cfg.architecture.n_layers)])
         self.ff_out = nn.Linear(self.d_model, vocab_size)
 
-    def forward(self, input_ids: torch.Tensor, causal_attn_mask: bool = False) -> torch.Tensor:
+    def forward(self, input_ids: torch.Tensor, causal_attn_mask: bool = False, debug_print: bool = False) -> torch.Tensor:
         """
         Executes the forward pass of the Vorox transformer model, converting token IDs to next-token logits.
         
@@ -1022,9 +1117,39 @@ class Vorox(nn.Module):
             - Performance degradation with extremely long sequences (>4096 tokens)
             - No built-in support for efficient batched generation
         """
+        import time
+        start_time = time.time()
+        
+        if debug_print:
+            print(f"[Vorox] Input shape: {input_ids.shape}, Memory: {input_ids.element_size() * input_ids.nelement() / 1024 / 1024:.2f} MB")
+            print(f"[Vorox] Device: {input_ids.device}, dtype: {input_ids.dtype}")
+            print(f"[Vorox] Causal attention mask: {causal_attn_mask}")
+        
+        emb_start = time.time()
         x = self.emb(input_ids)
-        x = self.transformer_blocks(x, causal_attn_mask=causal_attn_mask)
+        if debug_print:
+            print(f"[Vorox] Embedding time: {time.time() - emb_start:.4f}s")
+            print(f"[Vorox] Embedding output shape: {x.shape}, Memory: {x.element_size() * x.nelement() / 1024 / 1024:.2f} MB")
+        
+        blocks_start = time.time()
+        # Pass debug_print to each transformer block
+        for i, block in enumerate(self.transformer_blocks):
+            block_start = time.time()
+            x = block(x, causal_attn_mask=causal_attn_mask, debug_print=debug_print)
+            if debug_print:
+                print(f"[Vorox] Block {i} time: {time.time() - block_start:.4f}s")
+                print(f"[Vorox] Block {i} output shape: {x.shape}")
+        
+        if debug_print:
+            print(f"[Vorox] All transformer blocks time: {time.time() - blocks_start:.4f}s")
+        
+        ff_start = time.time()
         x = self.ff_out(x)
+        if debug_print:
+            print(f"[Vorox] Output projection time: {time.time() - ff_start:.4f}s")
+            print(f"[Vorox] Final output shape: {x.shape}, Memory: {x.element_size() * x.nelement() / 1024 / 1024:.2f} MB")
+            print(f"[Vorox] Total forward time: {time.time() - start_time:.4f}s")
+        
         return x
     
     @property
