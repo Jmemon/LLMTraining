@@ -179,8 +179,8 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
             logger.warning(f"Checkpoint file {checkpoint_path} not found, starting from scratch")
     
     # Training loop
-    for epoch in range(cfg.train.epochs):
-        logger.info(f"Starting epoch {epoch+1}/{cfg.train.epochs}")
+    for epoch in range(cfg.data.epochs):
+        logger.info(f"Starting epoch {epoch+1}/{cfg.data.epochs}")
         epoch_start_time = time.time()
         
         # Training phase
@@ -188,10 +188,15 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
         epoch_loss = 0.0
         num_batches = 0
         
-        # Progress bar for training with total number of batches
-        train_iterator = tqdm(train_loader, desc=f"Epoch {epoch+1}/{cfg.train.epochs}", total=len(train_loader))
+        # Progress bar for training showing token progress
+        train_iterator = tqdm(
+            total=cfg.data.epoch_tokens,
+            desc=f"Epoch {epoch+1}/{cfg.data.epochs}",
+            unit="tokens"
+        )
+        tokens_processed = 0
         
-        for batch_idx, batch in enumerate(train_iterator):
+        for batch_idx, batch in enumerate(train_loader):
             # Process batch - expecting dict with 'text' key containing list of strings
             text_samples = batch['text']
             
@@ -263,8 +268,16 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
             num_batches += 1
             global_step += 1
             
-            # Update progress bar
+            # Count tokens in this batch and update progress bar
+            batch_tokens = tokenized_inputs.input_ids.numel()
+            tokens_processed += batch_tokens
+            train_iterator.update(batch_tokens)
             train_iterator.set_postfix({"loss": loss.item()})
+            
+            # Check if we've processed enough tokens for this epoch
+            if tokens_processed >= cfg.data.epoch_tokens:
+                logger.info(f"Reached epoch token threshold ({tokens_processed}/{cfg.data.epoch_tokens}). Ending epoch.")
+                break
             
             # Calculate training metrics if enabled
             train_metrics_log = {}
@@ -375,10 +388,14 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
         # Calculate average epoch loss
         avg_epoch_loss = epoch_loss / num_batches
         epoch_time = time.time() - epoch_start_time
-        logger.info(f"Epoch {epoch+1} completed in {epoch_time:.2f}s, Avg Loss: {avg_epoch_loss:.6f}")
+        logger.info(f"Epoch {epoch+1} completed in {epoch_time:.2f}s, Avg Loss: {avg_epoch_loss:.6f}, Tokens: {tokens_processed}")
         
         if cfg.logging.wandb_project:
-            wandb.log({"train/epoch_loss": avg_epoch_loss, "epoch": epoch})
+            wandb.log({
+                "train/epoch_loss": avg_epoch_loss, 
+                "epoch": epoch,
+                "tokens_processed": tokens_processed
+            })
         
         # Final evaluation at the end of each epoch
         if evaluators:
