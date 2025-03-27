@@ -188,8 +188,8 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
         epoch_loss = 0.0
         num_batches = 0
         
-        # Progress bar for training
-        train_iterator = tqdm(train_loader, desc=f"Epoch {epoch+1}/{cfg.train.epochs}")
+        # Progress bar for training with total number of batches
+        train_iterator = tqdm(train_loader, desc=f"Epoch {epoch+1}/{cfg.train.epochs}", total=len(train_loader))
         
         for batch_idx, batch in enumerate(train_iterator):
             # Process batch - expecting dict with 'text' key containing list of strings
