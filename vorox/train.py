@@ -192,17 +192,17 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
         train_iterator = tqdm(train_loader, desc=f"Epoch {epoch+1}/{cfg.train.epochs}")
         
         for batch_idx, batch in enumerate(train_iterator):
-            # Handle different batch formats
-            if isinstance(batch, dict):
-                inputs = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-            elif isinstance(batch, torch.Tensor):
-                inputs = batch.to(device)
-            elif isinstance(batch, tuple) and len(batch) == 2:
-                # Assuming (input_ids, labels) format
-                input_ids, labels = batch
-                inputs = {"input_ids": input_ids.to(device), "labels": labels.to(device)}
-            else:
-                raise ValueError(f"Unsupported batch format: {type(batch)}")
+            # Process batch - expecting dict with 'text' key containing list of strings
+            text_samples = batch['text']
+            
+            # Tokenize the input text with padding/truncation
+            tokenized_inputs = tokenizer(
+                text_samples,
+                padding="max_length",
+                truncation=True,
+                max_length=cfg.train.max_seq_len,
+                return_tensors="pt"
+            ).to(device)
             
             # Zero gradients
             optimizer.zero_grad()
@@ -210,8 +210,20 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
             # Forward pass with optional AMP
             if use_amp:
                 with torch.cuda.amp.autocast():
-                    outputs = model(**inputs) if isinstance(inputs, dict) else model(inputs)
-                    loss = outputs.loss if hasattr(outputs, 'loss') else criterion(outputs, inputs.get("labels"))
+                    # Pass tokenized inputs to model with causal attention mask
+                    outputs = model(
+                        tokenized_inputs.input_ids,
+                        causal_attn_mask=True,
+                        apply_softmax_layer=True
+                    )
+                    
+                    # Calculate loss using the criterion
+                    # For autoregressive training, shift the inputs to create targets
+                    input_ids = tokenized_inputs.input_ids
+                    targets = input_ids[:, 1:].contiguous()  # Shift right to get targets
+                    model_outputs = outputs[:, :-1, :].contiguous()  # Remove last token prediction
+                    
+                    loss = criterion(model_outputs.view(-1, tokenizer.vocab_size), targets.view(-1))
                 
                 # Backward pass with scaler
                 scaler.scale(loss).backward()
@@ -225,8 +237,19 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
                 scaler.update()
             else:
                 # Standard forward/backward pass
-                outputs = model(**inputs) if isinstance(inputs, dict) else model(inputs)
-                loss = outputs.loss if hasattr(outputs, 'loss') else criterion(outputs, inputs.get("labels"))
+                outputs = model(
+                    tokenized_inputs.input_ids,
+                    causal_attn_mask=True,
+                    apply_softmax_layer=True
+                )
+                
+                # Calculate loss using the criterion
+                # For autoregressive training, shift the inputs to create targets
+                input_ids = tokenized_inputs.input_ids
+                targets = input_ids[:, 1:].contiguous()  # Shift right to get targets
+                model_outputs = outputs[:, :-1, :].contiguous()  # Remove last token prediction
+                
+                loss = criterion(model_outputs.view(-1, tokenizer.vocab_size), targets.view(-1))
                 loss.backward()
                 
                 # Gradient clipping
@@ -246,12 +269,11 @@ def train(cfg: RunConfig) -> Dict[str, Any]:
             # Calculate training metrics if enabled
             train_metrics_log = {}
             if cfg.metrics.compute_metrics and global_step % cfg.logging.log_every_n_steps == 0:
-                if hasattr(outputs, 'logits') and "labels" in inputs:
-                    batch_metrics = MetricsCalculator.calculate_metrics(
-                        outputs.logits, inputs["labels"], cfg.metrics.train_metrics
-                    )
-                    for metric_name, metric_value in batch_metrics.items():
-                        train_metrics_log[f"train/{metric_name}"] = metric_value
+                batch_metrics = MetricsCalculator.calculate_metrics(
+                    model_outputs, targets, cfg.metrics.train_metrics
+                )
+                for metric_name, metric_value in batch_metrics.items():
+                    train_metrics_log[f"train/{metric_name}"] = metric_value
             
             # Log metrics
             if global_step % cfg.logging.log_every_n_steps == 0:
